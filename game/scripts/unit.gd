@@ -39,12 +39,16 @@ var armor: int = 0
 
 # --- Angriff (docs/dice-system.md, docs/classes.md Abschnitt 8) -----------
 # Fernkampf/Nahkampf/Verteidigung: 1-10, Zielwert für den jeweiligen
-# Würfelpool ("Wurf <= Wert = Erfolg"). Die eigentliche Waffe (Reichweite,
-# AP/SD/Lethal) steckt in 'weapon', nicht direkt auf der Einheit.
+# Würfelpool ("Wurf <= Wert = Erfolg"). Die eigentlichen Waffen (Reichweite,
+# AP/SD/Lethal) stecken in ranged_weapon/melee_weapon, nicht direkt auf der
+# Einheit. Jeder Kämpfer hat inzwischen (mindestens) eine einfache
+# Behelfswaffe für beide Seiten (Pistole/Messer, siehe weapons.gd) - nur
+# Swarm-Kreaturen haben oft nur eine der beiden (null = nicht vorhanden).
 var ranged: int = 5
 var melee: int = 5
 var defense: int = 5
-var weapon: Weapon
+var ranged_weapon: Weapon
+var melee_weapon: Weapon
 var move_range: int = 6       # Felder pro Bewegungs-Aktion (einheitlich 6)
 var actions: int = 0          # verbleibende Aktionen in diesem Zug
 
@@ -79,7 +83,8 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 	ranged = stats.get("ranged", 5)
 	melee = stats.get("melee", 5)
 	defense = stats.get("defense", 5)
-	weapon = Weapons.make(stats.get("weapon", "standard_rifle"))
+	ranged_weapon = Weapons.make(stats["ranged_weapon"]) if stats.has("ranged_weapon") else null
+	melee_weapon = Weapons.make(stats["melee_weapon"]) if stats.has("melee_weapon") else null
 	move_range = stats.get("move", 6)
 	sentry = stats.get("sentry", false)
 	abilities = stats.get("abilities", [])

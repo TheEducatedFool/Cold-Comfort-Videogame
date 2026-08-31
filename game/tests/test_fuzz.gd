@@ -35,9 +35,13 @@ func _process(_d: float) -> bool:
 		var enemies = m._enemies()
 		enemies.shuffle()
 		for e in enemies:
-			if m._can_attack(sel, e):
+			if m._can_attack_melee(sel, e):
 				if m._commit(sel):
-					m._player_attack(sel, e)
+					m._player_attack(sel, e, true)
+				return false
+			if m._can_attack_ranged(sel, e):
+				if m._commit(sel):
+					m._player_attack(sel, e, false)
 				return false
 		m._end_activation()
 	elif r < 65:

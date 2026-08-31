@@ -40,21 +40,24 @@ func _init() -> void:
 	print("Bonuswuerfel leichte Deckung: ", Combat.cover_bonus_dice(Combat.HALF_COVER_MALUS) == 1)
 	print("Bonuswuerfel volle Deckung: ", Combat.cover_bonus_dice(Combat.FULL_COVER_MALUS) == 0)
 
-	# Zone of Control (dice-system.md Abschnitt 3, M4): rein geometrisch.
+	# Zone of Control (dice-system.md Abschnitt 3, M4): rein geometrisch,
+	# inklusive Diagonalen (Chebyshev-Distanz 1, alle 8 Nachbarfelder -
+	# Kamils Ergaenzung vom 2026-08-31: Kontrollzone und Nahkampfreichweite
+	# umfassen auch diagonal angrenzende Felder).
 	print("angrenzendes Feld liegt in der ZoC: ", Combat.in_zoc(Vector2i(5, 5), Vector2i(5, 6)) == true)
-	print("diagonal liegt NICHT in der ZoC (nur orthogonal, Manhattan 1): ", \
-		Combat.in_zoc(Vector2i(5, 5), Vector2i(6, 6)) == false)
+	print("diagonal angrenzendes Feld liegt AUCH in der ZoC: ", \
+		Combat.in_zoc(Vector2i(5, 5), Vector2i(6, 6)) == true)
 	print("zwei Felder entfernt liegt nicht in der ZoC: ", Combat.in_zoc(Vector2i(5, 5), Vector2i(7, 5)) == false)
 	print("Wegzug aus angrenzendem Feld verlaesst die ZoC: ", \
 		Combat.leaves_zoc(Vector2i(5, 5), Vector2i(5, 3), Vector2i(5, 6)) == true)
 	print("Wegzug aus einem Feld ausserhalb der ZoC verlaesst nichts: ", \
 		Combat.leaves_zoc(Vector2i(7, 5), Vector2i(8, 5), Vector2i(5, 6)) == false)
-	# Ein einzelner orthogonaler Schritt kann geometrisch nie innerhalb der
-	# ZoC DESSELBEN Gegners bleiben (zwei Felder mit Manhattan-Distanz 1 zum
-	# selben Zentrum haben stets Manhattan-Distanz 2 zueinander) - ein Schritt
-	# in ein anderes angrenzendes Feld verlaesst also immer diesen Gegner,
-	# koennte aber gleichzeitig in die ZoC eines ANDEREN Gegners hineinfuehren
-	# (das behandelt main.gd, nicht diese reine Funktion).
-	print("Schritt in ein Feld ausserhalb bleibt kein Sonderfall: ", \
-		Combat.leaves_zoc(Vector2i(5, 5), Vector2i(4, 5), Vector2i(5, 6)) == true)
+	# Dank der Diagonalen kann man jetzt tatsaechlich EINEN orthogonalen
+	# Schritt am Ring um einen Gegner entlanglaufen, ohne seine ZoC zu
+	# verlassen (z. B. von oestlich nach nordoestlich) - bei reiner
+	# Orthogonal-ZoC (vor dieser Ergaenzung) war das geometrisch unmoeglich.
+	print("ein Schritt am Ring entlang bleibt in derselben ZoC: ", \
+		Combat.leaves_zoc(Vector2i(6, 5), Vector2i(6, 4), Vector2i(5, 5)) == false)
+	print("ein Schritt aus dem Ring heraus verlaesst sie: ", \
+		Combat.leaves_zoc(Vector2i(6, 5), Vector2i(7, 5), Vector2i(5, 5)) == true)
 	quit()

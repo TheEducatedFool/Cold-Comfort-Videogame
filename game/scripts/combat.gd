@@ -94,10 +94,12 @@ static func cover_bonus_dice(malus: int) -> int:
 ## jede Runde neu aus der Position abgelesen (kein gespeicherter Zustand).
 ## ---------------------------------------------------------------------
 
-## Liegt 'cell' in der Zone of Control von 'controller_cell' (direkt
-## angrenzend, Manhattan-Distanz 1)?
+## Liegt 'cell' in der Zone of Control von 'controller_cell' - direkt
+## angrenzend, inklusive Diagonalen (Schachbrett-/Chebyshev-Distanz 1,
+## alle 8 Nachbarfelder)?
 static func in_zoc(cell: Vector2i, controller_cell: Vector2i) -> bool:
-	return absi(cell.x - controller_cell.x) + absi(cell.y - controller_cell.y) == 1
+	var d := cell - controller_cell
+	return maxi(absi(d.x), absi(d.y)) == 1
 
 
 ## Verlässt ein Schritt von 'from' nach 'to' die Zone of Control von

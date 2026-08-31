@@ -28,8 +28,8 @@ extends Node3D
 
 # --- Spielregeln / Stellschrauben -----------------------------------------
 
-const GRID_W := 12
-const GRID_H := 12
+const GRID_W := 22
+const GRID_H := 40
 const TILE := 2.0
 const ACTIONS_PER_TURN := 2
 
@@ -56,17 +56,42 @@ const ABILITIES := {
 
 # Blockierte Felder der Testkarte: Vector2i -> Hindernishöhe in Metern.
 # Niedrig (1.0) = Kiste / halbe Deckung, hoch (2.2) = Wand / volle Deckung.
-const OBSTACLES := {
-	Vector2i(4, 2): 2.2, Vector2i(4, 3): 2.2, Vector2i(4, 4): 2.2,
-	Vector2i(8, 8): 2.2, Vector2i(8, 9): 2.2, Vector2i(9, 8): 2.2,
-	Vector2i(2, 7): 1.0, Vector2i(3, 7): 1.0,
-	Vector2i(6, 5): 1.0, Vector2i(7, 5): 1.0, Vector2i(7, 6): 1.0,
-	Vector2i(10, 3): 1.0, Vector2i(10, 4): 1.0,
-	Vector2i(5, 9): 1.0, Vector2i(1, 4): 1.0,
-}
+# Wird in _generate_obstacles() befüllt (22x40 ist zu groß für eine von
+# Hand aufgezählte const-Liste) - kein echtes Level-Design, nur genug
+# Struktur (Raumtrenner mit Türlücken, verstreute Kisten) für Deckungs-/
+# Sichtlinien-Taktik auf der größeren Karte.
+var OBSTACLES: Dictionary = {}
+
+
+## Baut ein einfaches "Korridor mit Räumen"-Muster: Wandreihen alle 8
+## Felder mit je 2 Türlücken (Position wechselt zeilenweise), dazwischen
+## verstreute Kisten als halbe Deckung.
+func _generate_obstacles() -> Dictionary:
+	var obs: Dictionary = {}
+	var wall_rows := [8, 16, 24, 32]
+	for i in wall_rows.size():
+		var y: int = wall_rows[i]
+		var gaps: Array = [5, 6, 15, 16] if i % 2 == 0 else [9, 10, 18, 19]
+		for x in range(GRID_W):
+			if x in gaps:
+				continue
+			obs[Vector2i(x, y)] = 2.2
+	var room_bands := [[1, 6], [10, 14], [18, 22], [26, 30], [34, 38]]
+	for band in room_bands:
+		var y0: int = band[0]
+		var y1: int = band[1]
+		var span: int = y1 - y0 + 1
+		for x in [2, 6, 10, 14, 18]:
+			var y: int = y0 + ((x * 3 + y0) % span)
+			obs[Vector2i(x, y)] = 1.0
+	return obs
 
 # Kampfwerte der 5 Klassen (docs/classes.md Abschnitt 8, exakte
-# Basiswerte) plus Startwaffe (docs/traits.md 0.2, siehe weapons.gd).
+# Basiswerte) plus Waffen (docs/traits.md 0.2, siehe weapons.gd). Jede
+# Klasse hat inzwischen BEIDE Waffentypen: die eigentliche Klassenwaffe auf
+# ihrer starken Seite, dazu eine Pistole/ein Messer ohne besondere Werte
+# für die schwache Seite (Kamils Playtest-Feedback, 2026-08-31) - so kann
+# jeder Kämpfer wahlweise schießen ODER im Nahkampf zuschlagen.
 # Schild ist noch kein Klassen-Basiswert (kommt später über
 # Werkstatt-Ausrüstung, docs/gdd.md) - Platzhalter 0 für alle.
 # Fähigkeiten-Zuordnung ist provisorisch (bestehende 4 Fähigkeiten aus dem
@@ -75,45 +100,49 @@ const OBSTACLES := {
 const STATS_BREACHER := {
 	"hp": 4, "shield": 0, "armor": 1,
 	"ranged": 6, "melee": 7, "defense": 3,
-	"move": 6, "weapon": "combat_shotgun",
+	"move": 6, "ranged_weapon": "combat_shotgun", "melee_weapon": "knife",
 	"abilities": ["slug_rush"],
 }
 const STATS_DEADEYE := {
 	"hp": 4, "shield": 0, "armor": 1,
 	"ranged": 7, "melee": 4, "defense": 5,
-	"move": 6, "weapon": "sniper_rifle",
+	"move": 6, "ranged_weapon": "sniper_rifle", "melee_weapon": "knife",
 	"sentry": true,  # Kern-Passiv: siehe TODO Design-Entscheidung bei _overwatch_shot
 }
 const STATS_HANDLER := {
 	"hp": 5, "shield": 0, "armor": 1,
 	"ranged": 4, "melee": 4, "defense": 7,
-	"move": 6, "weapon": "standard_rifle",
+	"move": 6, "ranged_weapon": "standard_rifle", "melee_weapon": "knife",
 	"abilities": ["mend", "shock"],
 }
 const STATS_HEAVY := {
 	"hp": 5, "shield": 0, "armor": 2,
 	"ranged": 7, "melee": 3, "defense": 3,
-	"move": 6, "weapon": "heavy_machine_gun",
+	"move": 6, "ranged_weapon": "heavy_machine_gun", "melee_weapon": "knife",
 	"abilities": ["bulwark"],
 }
 const STATS_REIVER := {
 	"hp": 5, "shield": 0, "armor": 0,
 	"ranged": 5, "melee": 7, "defense": 5,
-	"move": 6, "weapon": "chain_blade",
+	"move": 6, "ranged_weapon": "pistol", "melee_weapon": "chain_blade",
 }
 
 # Swarm-Werte: noch nicht in den Docs vorgegeben - TODO Balancing, grob an
-# Handler-Niveau bzw. niedriger orientiert (prototype-plan.md M2).
+# Handler-Niveau bzw. niedriger orientiert (prototype-plan.md M2). Bleiben
+# bewusst einseitig (Drohne nur Nahkampf, Spitter nur Fernkampf) - Kamils
+# Pistole/Messer-Wunsch bezog sich auf die 5 Kämpfer-Klassen, nicht auf
+# die Swarm-Kreaturen, die als reine Nahkampf-/Fernkampf-Archetypen
+# gedacht sind (siehe gdd.md).
 # Nach Kamils erstem Playtest (2026-08-31) einen Schritt staerker gemacht.
 const STATS_DRONE := {
 	"hp": 4, "shield": 0, "armor": 1,
 	"ranged": 3, "melee": 5, "defense": 4,
-	"move": 6, "weapon": "drone_claws",
+	"move": 6, "melee_weapon": "drone_claws",
 }
 const STATS_SPITTER := {
 	"hp": 3, "shield": 0, "armor": 0,
 	"ranged": 5, "melee": 3, "defense": 4,
-	"move": 6, "weapon": "spitter_acid",
+	"move": 6, "ranged_weapon": "spitter_acid",
 }
 
 const SHIP_TURN_LINES := [
@@ -199,6 +228,7 @@ var los_nodes: Array = []
 
 func _ready() -> void:
 	randomize()
+	OBSTACLES = _generate_obstacles()
 	_make_materials()
 	_build_grid_logic()
 	_build_floor()
@@ -333,6 +363,25 @@ func _apply_cam_yaw(yaw_deg: float) -> void:
 	camera.look_at(map_center)
 
 
+## Zentriert die Kamera weich auf eine Weltposition - auf der 22x40-Karte
+## ist sonst immer nur ein kleiner Ausschnitt sichtbar. Wird bei
+## Auswahlwechsel und nach Bewegung der ausgewählten Einheit aufgerufen.
+func _center_camera_on(pos: Vector3) -> void:
+	var target := Vector3(pos.x, 0.0, pos.z)
+	if map_center.distance_to(target) < 0.01:
+		return
+	if cam_tween != null and cam_tween.is_valid():
+		cam_tween.kill()
+	cam_tween = create_tween()
+	cam_tween.tween_method(_set_map_center, map_center, target, 0.3) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func _set_map_center(pos: Vector3) -> void:
+	map_center = pos
+	_apply_cam_yaw(cam_yaw)
+
+
 ## Dreht die Kamera weich um 90° nach links (-1) oder rechts (+1).
 func _rotate_camera(dir: int) -> void:
 	if camera == null:
@@ -349,18 +398,19 @@ func _spawn_units() -> void:
 	# Platzhalter-Trupp aus den 5 aktuellen Klassen (docs/classes.md) -
 	# noch keine benannten Rekruten (kommt mit dem Rekrutierungs-Pool
 	# später), Werte siehe STATS_* oben.
-	_add_unit("Breacher", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, Vector2i(1, 1))
-	_add_unit("Deadeye", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, Vector2i(1, 3))
-	_add_unit("Handler", Unit.Faction.PLAYER, Color("c9b458"), STATS_HANDLER, Vector2i(0, 2))
-	_add_unit("Heavy", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_HEAVY, Vector2i(2, 2))
-	_add_unit("Reiver", Unit.Faction.PLAYER, Color("8a6f9e"), STATS_REIVER, Vector2i(0, 0))
-	# Der Swarm: Nahkampf-Drohnen und Fernkampf-Spitter.
-	_add_unit("Drohne A", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(10, 10))
-	_add_unit("Drohne B", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(11, 6))
-	_add_unit("Drohne C", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(6, 11))
-	_add_unit("Drohne D", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(11, 9))
-	_add_unit("Spitter A", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(9, 5))
-	_add_unit("Spitter B", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(5, 10))
+	# Startraum am "Eingang" (niedrige y) des 22x40-Korridors.
+	_add_unit("Breacher", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, Vector2i(4, 3))
+	_add_unit("Deadeye", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, Vector2i(8, 3))
+	_add_unit("Handler", Unit.Faction.PLAYER, Color("c9b458"), STATS_HANDLER, Vector2i(12, 3))
+	_add_unit("Heavy", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_HEAVY, Vector2i(16, 3))
+	_add_unit("Reiver", Unit.Faction.PLAYER, Color("8a6f9e"), STATS_REIVER, Vector2i(20, 3))
+	# Der Swarm: über die weiteren Räume des Korridors verteilt.
+	_add_unit("Drohne A", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(8, 12))
+	_add_unit("Drohne B", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(16, 13))
+	_add_unit("Drohne C", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(8, 27))
+	_add_unit("Drohne D", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(16, 28))
+	_add_unit("Spitter A", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(12, 20))
+	_add_unit("Spitter B", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(12, 35))
 
 
 func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, start: Vector2i) -> void:
@@ -555,15 +605,32 @@ func _can_shoot(u: Unit) -> bool:
 	return u.actions > 0 or u.free_shot
 
 
-## Kann 'attacker' 'target' mit seiner aktuellen Waffe angreifen?
-## Nahkampf: angrenzendes Feld (Manhattan-Distanz 1). Fernkampf: Sichtlinie
-## und innerhalb der Waffenreichweite.
-func _can_attack(attacker: Unit, target: Unit) -> bool:
-	if attacker.weapon.is_melee:
-		return _manhattan(attacker.cell, target.cell) == 1
+## Kann 'attacker' 'target' im Nahkampf angreifen (Messer/Nahkampfwaffe,
+## Ziel in der eigenen Zone of Control - inklusive Diagonalen)?
+func _can_attack_melee(attacker: Unit, target: Unit) -> bool:
+	if attacker.melee_weapon == null:
+		return false
+	return Combat.in_zoc(attacker.cell, target.cell)
+
+
+## Kann 'attacker' 'target' im Fernkampf angreifen (Sichtlinie, Waffen-
+## reichweite)? Neue Regel aus Kamils Playtest: steht man in der Zone of
+## Control DIESES Ziels (also direkt neben ihm), kann man nicht auf es
+## schießen, sondern ist gegen es auf Nahkampf beschränkt - ein anderes,
+## nicht angrenzendes Ziel darf man weiterhin normal beschießen.
+func _can_attack_ranged(attacker: Unit, target: Unit) -> bool:
+	if attacker.ranged_weapon == null:
+		return false
+	if Combat.in_zoc(attacker.cell, target.cell):
+		return false
 	if not Combat.line_of_sight(grid, attacker.cell, target.cell):
 		return false
-	return _dist(attacker.cell, target.cell) <= float(attacker.weapon.weapon_range)
+	return _dist(attacker.cell, target.cell) <= float(attacker.ranged_weapon.weapon_range)
+
+
+## Kann 'attacker' 'target' irgendwie angreifen (Fernkampf ODER Nahkampf)?
+func _can_attack(attacker: Unit, target: Unit) -> bool:
+	return _can_attack_ranged(attacker, target) or _can_attack_melee(attacker, target)
 
 
 func _can_move(u: Unit) -> bool:
@@ -704,10 +771,17 @@ func _open_action_menu(attacker: Unit, target: Unit, screen_pos: Vector2) -> voi
 	ui_layer.add_child(menu)
 	var actions: Array[Callable] = []
 
-	if _can_shoot(attacker) and _can_attack(attacker, target):
-		var label := "Nahkampf" if attacker.weapon.is_melee else "Schießen"
-		menu.add_item(label)
-		actions.append(func() -> void: _player_attack(attacker, target))
+	if _can_shoot(attacker) and _can_attack_ranged(attacker, target):
+		menu.add_item("Schießen (%s)" % attacker.ranged_weapon.weapon_name)
+		actions.append(func() -> void:
+			if _commit(attacker):
+				_player_attack(attacker, target, false))
+
+	if _can_shoot(attacker) and _can_attack_melee(attacker, target):
+		menu.add_item("Nahkampf (%s)" % attacker.melee_weapon.weapon_name)
+		actions.append(func() -> void:
+			if _commit(attacker):
+				_player_attack(attacker, target, true))
 
 	for aid in attacker.abilities:
 		if aid == "shock" and attacker.actions > 0 and attacker.cooldown_of("shock") == 0 \
@@ -762,30 +836,36 @@ func _update_hover(screen_pos: Vector2) -> void:
 	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
 		target_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
 		target_marker.visible = true
-		if not _can_attack(selected, u):
-			info_label.text = "Ziel: %s – keine Sichtlinie, außer Reichweite oder nicht angrenzend" % u.unit_name
+		var previews: Array[String] = []
+		if _can_attack_ranged(selected, u):
+			var w := selected.ranged_weapon
+			var cm := Combat.cover_malus(grid, selected.cell, u.cell, _extra_cover_for(u))
+			var bonus := Combat.cover_bonus_dice(cm)
+			var cover_txt := "flankiert"
+			if cm == Combat.FULL_COVER_MALUS:
+				cover_txt = "volle Deckung"
+			elif cm == Combat.HALF_COVER_MALUS:
+				cover_txt = "halbe Deckung"
+			previews.append("Schießen %d Würfel (%s) · AP %d · SD %d · Tödlich %d" \
+				% [3 + bonus, cover_txt, w.ap, w.sd, w.lethal])
+		if _can_attack_melee(selected, u):
+			var w := selected.melee_weapon
+			var bonus := (2 if selected.charge_ready else 0) + (1 if _flanking(selected, u) else 0)
+			previews.append("Nahkampf %d Würfel · AP %d · SD %d · Tödlich %d" \
+				% [3 + bonus, w.ap, w.sd, w.lethal])
+		if previews.is_empty():
+			if Combat.in_zoc(selected.cell, u.cell) and selected.ranged_weapon != null and selected.melee_weapon == null:
+				info_label.text = "Ziel: %s – zu nah zum Schießen, keine Nahkampfwaffe" % u.unit_name
+			else:
+				info_label.text = "Ziel: %s – keine Sichtlinie, außer Reichweite oder nicht angrenzend" % u.unit_name
 		else:
-			var w := selected.weapon
-			var cover_txt := ""
-			var bonus := 0
-			if not w.is_melee:
-				var cm := Combat.cover_malus(grid, selected.cell, u.cell, _extra_cover_for(u))
-				bonus = Combat.cover_bonus_dice(cm)
-				if cm == Combat.FULL_COVER_MALUS:
-					cover_txt = " · volle Deckung"
-				elif cm == Combat.HALF_COVER_MALUS:
-					cover_txt = " · halbe Deckung"
-				else:
-					cover_txt = " · FLANKIERT!"
-			var pool := 3 + bonus
-			var dmg_txt := "AP %d · SD %d · Tödlich %d" % [w.ap, w.sd, w.lethal]
 			var def_txt := ""
 			if u.shield > 0:
 				def_txt += " · Ziel-Schild %d" % u.shield
 			if u.armor > 0:
 				def_txt += " · Ziel-Panzerung %d" % u.armor
-			info_label.text = "Ziel: %s – %d Würfel%s · %s%s · Klick für Aktionsmenü" \
-				% [u.unit_name, pool, cover_txt, dmg_txt, def_txt]
+			info_label.text = "Ziel: %s – %s%s · Klick für Aktionsmenü" \
+				% [u.unit_name, " / ".join(previews), def_txt]
 	elif highlight_nodes.has(c):
 		hover_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
 		hover_marker.visible = true
@@ -954,6 +1034,7 @@ func _select(u: Unit) -> void:
 	u.add_child(select_ring)
 	select_ring.position = Vector3(0, 0.02, 0)
 	select_ring.visible = true
+	_center_camera_on(u.position)
 	_refresh_highlights()
 	_refresh_los_debug()
 	_show_unit_stats(u)
@@ -982,7 +1063,6 @@ func _show_unit_stats(u: Unit) -> void:
 	if u == null or not is_instance_valid(u):
 		stat_panel.text = ""
 		return
-	var w := u.weapon
 	var rows: Array = [
 		["Fraktion", "Spieler" if u.faction == Unit.Faction.PLAYER else "Swarm"],
 		["HP", "%d/%d" % [u.hp, u.max_hp]],
@@ -993,9 +1073,14 @@ func _show_unit_stats(u: Unit) -> void:
 	rows.append(["Fernkampf", str(u.ranged)])
 	rows.append(["Nahkampf", str(u.melee)])
 	rows.append(["Verteidigung", str(u.defense)])
-	rows.append(["Waffe", w.weapon_name])
-	rows.append(["  Reichweite", "Nahkampf (angrenzend)" if w.is_melee else str(w.weapon_range)])
-	rows.append(["  AP / SD / Tödlich", "%d / %d / %d" % [w.ap, w.sd, w.lethal]])
+	if u.ranged_weapon != null:
+		var rw := u.ranged_weapon
+		rows.append(["FK-Waffe", "%s (Reichw. %d)" % [rw.weapon_name, rw.weapon_range]])
+		rows.append(["  AP / SD / Tödlich", "%d / %d / %d" % [rw.ap, rw.sd, rw.lethal]])
+	if u.melee_weapon != null:
+		var mw := u.melee_weapon
+		rows.append(["NK-Waffe", mw.weapon_name])
+		rows.append(["  AP / SD / Tödlich", "%d / %d / %d" % [mw.ap, mw.sd, mw.lethal]])
 	var status: Array[String] = []
 	if u.overwatch:
 		status.append("Overwatch")
@@ -1072,6 +1157,8 @@ func _refresh_highlights() -> void:
 
 func _on_any_move_finished() -> void:
 	_refresh_los_debug()
+	if selected != null and is_instance_valid(selected):
+		_center_camera_on(selected.position)
 	if player_turn:
 		_refresh_highlights()
 		_update_labels()
@@ -1094,7 +1181,8 @@ func _refresh_los_debug() -> void:
 				continue
 			var mat := mat_los_blocked
 			if Combat.line_of_sight(grid, selected.cell, c):
-				if _dist(selected.cell, c) <= float(selected.weapon.weapon_range):
+				var rng := selected.ranged_weapon.weapon_range if selected.ranged_weapon != null else 1
+				if _dist(selected.cell, c) <= float(rng):
 					mat = mat_los_ok
 				else:
 					mat = mat_los_far
@@ -1147,8 +1235,8 @@ func _fire_tracer(shooter: Unit, target: Unit, hit: bool, color: Color) -> void:
 
 
 ## Spielt die passende Angriffsanimation der Figur (Fernkampf/Nahkampf).
-func _play_attack_anim(attacker: Unit) -> void:
-	if attacker.weapon.is_melee:
+func _play_attack_anim(attacker: Unit, use_melee: bool) -> void:
+	if use_melee:
 		attacker.play_attack_melee()
 	else:
 		attacker.play_attack_ranged()
@@ -1196,47 +1284,65 @@ func _drone_flight(from_u: Unit, to_u: Unit) -> void:
 ## als Treffer oder Fehlschuss fliegen soll. "net" > 0 heißt: der Angriff
 ## hat die Verteidigung durchbrochen (auch wenn am Ende 0 HP-Schaden
 ## durchkommt, weil Panzerung/Schild alles auffangen).
-## Nahkampf-Boni (Charge/ZoC/Flanking) fehlen noch - kommen erst in M4.
+## 'use_melee': welche Waffe genutzt wird - true für Nahkampf
+## (melee_weapon, Nahkampf-Stat, Charge-/Flanking-Boni), false für
+## Fernkampf (ranged_weapon, Fernkampf-Stat, Deckungs-Bonus). Jeder
+## Kämpfer hat inzwischen beide Waffentypen (mind. Pistole/Messer als
+## Behelfswaffe, siehe weapons.gd) - für den seltenen Fall, dass eine
+## Waffe fehlt (z. B. Swarm-Gegner), wird mit AP/SD/Lethal 0 gerechnet.
 ## 'extra_bonus': situative Zusatzwürfel, die nicht aus Deckung/Charge/
 ## Flanking stammen (z. B. der +1-Deckel beim ZoC-Gegenangriff aus
-## mehreren gleichzeitig verlassenen Zonen, siehe _resolve_zoc_exit).
-## 'force_melee': fuer den ZoC-Gegenangriff (_resolve_zoc_exit) - jeder
-## Kaempfer kontrolliert seine Zone of Control unabhaengig von seiner
-## Waffe (dice-system.md Abschnitt 3: "Jeder Kämpfer..."), auch ein reiner
-## Fernkaempfer wie Deadeye greift dabei mit seinem Nahkampf-Stat an.
-func _roll_attack(attacker: Unit, target: Unit, extra_bonus: int = 0, force_melee: bool = false) -> Dictionary:
-	var w := attacker.weapon
-	var is_melee := force_melee or w.is_melee
+## mehreren gleichzeitig verlassenen Zonen, siehe _resolve_zoc_exit -
+## der dort auch für Fernkämpfer immer 'use_melee=true' übergibt, da
+## jeder Kämpfer seine Zone of Control unabhängig von der Waffe
+## kontrolliert, dice-system.md Abschnitt 3).
+func _roll_attack(attacker: Unit, target: Unit, use_melee: bool, extra_bonus: int = 0) -> Dictionary:
+	var w: Weapon = attacker.melee_weapon if use_melee else attacker.ranged_weapon
+	var ap := w.ap if w != null else 0
+	var sd := w.sd if w != null else 0
+	var lethal := w.lethal if w != null else 0
 	var bonus := extra_bonus
-	var bonus_txt := ""
-	if is_melee:
+	var pool_parts: Array[String] = ["Basis 3"]
+	if extra_bonus != 0:
+		pool_parts.append("Sonderbonus %+d" % extra_bonus)
+	if use_melee:
 		if attacker.charge_ready:
 			bonus += 2
 			attacker.charge_ready = false
-			bonus_txt += " · Charge"
+			pool_parts.append("Charge +2")
 		if _flanking(attacker, target):
 			bonus += 1
-			bonus_txt += " · Flanking"
+			pool_parts.append("Flanking +1")
 	else:
 		var cm := Combat.cover_malus(grid, attacker.cell, target.cell, _extra_cover_for(target))
-		bonus += Combat.cover_bonus_dice(cm)
-	var skill := attacker.melee if is_melee else attacker.ranged
+		var cover_bonus := Combat.cover_bonus_dice(cm)
+		bonus += cover_bonus
+		var cover_label := "flankiert"
+		if cm == Combat.FULL_COVER_MALUS:
+			cover_label = "volle Deckung"
+		elif cm == Combat.HALF_COVER_MALUS:
+			cover_label = "leichte Deckung"
+		pool_parts.append("%s %+d" % [cover_label, cover_bonus])
+	var pool_txt := "%s = %d Würfel" % [" + ".join(pool_parts), 3 + bonus]
+	var skill := attacker.melee if use_melee else attacker.ranged
 	var atk := Combat.roll_pool(3 + bonus, skill)
 	var def := Combat.roll_pool(3, target.defense)
 	var net := Combat.net_successes(atk["hits"], def["hits"])
-	var res := Combat.resolve_net_damage(net, w.ap, w.sd, w.lethal, target.shield, target.armor)
+	var res := Combat.resolve_net_damage(net, ap, sd, lethal, target.shield, target.armor)
 	res["net"] = net
-	_log_roll(attacker, target, atk, def, net, res, bonus_txt)
+	_log_roll(attacker, target, atk, def, net, res, pool_txt)
 	return res
 
 
 ## Hängt eine Zeile mit der vollen Würfel-Aufschlüsselung ans Log an
-## (letzte ROLL_LOG_MAX Angriffe, neueste unten).
-func _log_roll(attacker: Unit, target: Unit, atk: Dictionary, def: Dictionary, net: int, res: Dictionary, bonus_txt: String) -> void:
+## (letzte ROLL_LOG_MAX Angriffe, neueste unten) - inklusive, wie sich der
+## Angriffspool zusammensetzt (Basis + Deckung/Charge/Flanking/Sonderbonus),
+## damit sich deren Wirkung auf den Pool nachvollziehen lässt.
+func _log_roll(attacker: Unit, target: Unit, atk: Dictionary, def: Dictionary, net: int, res: Dictionary, pool_txt: String) -> void:
 	if log_panel == null:
 		return
-	var line := "[b]%s[/b] -> %s%s\n  Angriff %s = %d Treffer (%d Krit) · Verteidigung %s = %d Erfolge\n  Netto %d" \
-		% [attacker.unit_name, target.unit_name, bonus_txt, \
+	var line := "[b]%s[/b] -> %s\n  Pool: %s\n  Angriff %s = %d Treffer (%d Krit) · Verteidigung %s = %d Erfolge\n  Netto %d" \
+		% [attacker.unit_name, target.unit_name, pool_txt, \
 			str(atk["rolls"]), atk["hits"], atk["crits"], str(def["rolls"]), def["hits"], net]
 	if net > 0:
 		line += " · Schild -%d · HP -%d" % [res["shield"], res["hp"]]
@@ -1273,17 +1379,25 @@ func _show_hit_popup(target: Unit, res: Dictionary) -> void:
 		_spawn_popup(target.position, "ABGEPRALLT", Color("cfd6e4"))
 
 
-func _player_attack(attacker: Unit, target: Unit) -> void:
-	var roll := _roll_attack(attacker, target)
+## 'use_melee': Schießen (false) oder Nahkampf (true) - siehe _roll_attack.
+func _player_attack(attacker: Unit, target: Unit, use_melee: bool) -> void:
+	# Charge (dice-system.md Abschnitt 3): der ausgelöste Nahkampfangriff
+	# direkt nach dem aktiven Reinbewegen in eine gegnerische ZoC kostet
+	# KEINEN zusätzlichen Aktionspunkt - _roll_attack verbraucht
+	# charge_ready gleich mit, daher hier VOR dem Aufruf sichern.
+	var charge_free := use_melee and attacker.charge_ready
+	var roll := _roll_attack(attacker, target, use_melee)
 	if attacker.free_shot:
 		attacker.free_shot = false  # Slug-Rush-Freischuss verbraucht
+	elif charge_free:
+		pass  # Charge-Angriff ist Teil der Bewegung, kein Extra-Aktionspunkt
 	else:
 		attacker.actions -= 1
 	target_marker.visible = false
 
 	var hit: bool = roll["net"] > 0
 	anim_busy = true
-	_play_attack_anim(attacker)
+	_play_attack_anim(attacker, use_melee)
 	await _fire_tracer(attacker, target, hit, Color(1.0, 0.9, 0.5))
 	anim_busy = false
 	if hit:
@@ -1441,7 +1555,7 @@ func _build_enemy_queue() -> void:
 	enemy_queue.clear()
 	var drones: Array[Unit] = []
 	for e in _enemies():
-		if e.weapon.is_melee:
+		if e.melee_weapon != null:
 			drones.append(e)
 		else:
 			enemy_queue.append([e])
@@ -1492,7 +1606,7 @@ func _swarm_step() -> void:
 			continue
 		if _players().is_empty():
 			return
-		if enemy.weapon.is_melee:
+		if enemy.melee_weapon != null:
 			await _drone_activation(enemy)
 		else:
 			await _spitter_activation(enemy)
@@ -1549,7 +1663,7 @@ func _drone_activation(enemy: Unit) -> void:
 		if _manhattan(enemy.cell, p.cell) < _manhattan(enemy.cell, target.cell):
 			target = p
 
-	if _manhattan(enemy.cell, target.cell) > 1:
+	if not Combat.in_zoc(enemy.cell, target.cell):
 		var occ := _occupied_cells(enemy)
 		var reach := grid.reachable(enemy.cell, enemy.move_range, occ)
 		var best := enemy.cell
@@ -1568,7 +1682,7 @@ func _drone_activation(enemy: Unit) -> void:
 		return  # im Overwatch-Feuer oder ZoC-Gegenangriff gefallen
 
 	for p in _players():
-		if _manhattan(enemy.cell, p.cell) == 1:
+		if Combat.in_zoc(enemy.cell, p.cell):
 			await _enemy_attack(enemy, p)
 			break
 
@@ -1621,7 +1735,7 @@ func _best_shot_target(sp: Unit) -> Dictionary:
 	var bt: Unit = null
 	var bs := -1
 	for p in _players():
-		if not _can_attack(sp, p):
+		if not _can_attack_ranged(sp, p):
 			continue
 		var cm := Combat.cover_malus(grid, sp.cell, p.cell, _extra_cover_for(p))
 		var pool := 3 + Combat.cover_bonus_dice(cm)
@@ -1637,7 +1751,9 @@ func _best_shot_target(sp: Unit) -> Dictionary:
 func _spitter_shot_score(from: Vector2i, sp: Unit) -> int:
 	var best := -1
 	for p in _players():
-		if _dist(from, p.cell) > float(sp.weapon.weapon_range):
+		if Combat.in_zoc(from, p.cell):
+			continue  # zu nah dran -> von dort aus nicht beschiessbar
+		if _dist(from, p.cell) > float(sp.ranged_weapon.weapon_range):
 			continue
 		if not Combat.line_of_sight(grid, from, p.cell):
 			continue
@@ -1648,9 +1764,9 @@ func _spitter_shot_score(from: Vector2i, sp: Unit) -> int:
 
 
 func _enemy_ranged_attack(enemy: Unit, target: Unit) -> void:
-	var roll := _roll_attack(enemy, target)
+	var roll := _roll_attack(enemy, target, false)
 	var hit: bool = roll["net"] > 0
-	_play_attack_anim(enemy)
+	_play_attack_anim(enemy, false)
 	await _fire_tracer(enemy, target, hit, Color(0.72, 0.91, 0.43))  # Säure
 	if hit:
 		var res := _apply_attack_result(target, roll)
@@ -1668,7 +1784,7 @@ func _overwatchers_seeing(c: Vector2i) -> Array[Unit]:
 	for p in _players():
 		if not p.overwatch:
 			continue
-		if _dist(p.cell, c) > float(p.weapon.weapon_range):
+		if _dist(p.cell, c) > float(p.ranged_weapon.weapon_range):
 			continue
 		if Combat.line_of_sight(grid, p.cell, c):
 			result.append(p)
@@ -1750,7 +1866,7 @@ func _resolve_zoc_exit(mover: Unit, from_cell: Vector2i, to_cell: Vector2i) -> v
 	_spawn_popup(attacker.position, "ZOC!", Color("ff9d6a"))
 	await get_tree().create_timer(0.2).timeout
 	attacker.play_attack_melee()  # ZoC-Gegenangriff ist immer Nahkampf
-	var roll := _roll_attack(attacker, mover, bonus, true)
+	var roll := _roll_attack(attacker, mover, true, bonus)
 	if roll["net"] > 0:
 		_apply_attack_result(mover, roll)
 	else:
@@ -1799,13 +1915,13 @@ func _flanking(attacker: Unit, target: Unit) -> bool:
 ## bis dahin wirkungslos, statt hier eigenmächtig einen Wert zu erfinden).
 func _overwatch_shot(w: Unit, enemy: Unit) -> void:
 	w.set_overwatch(false)
-	if not _can_attack(w, enemy):
+	if not _can_attack_ranged(w, enemy):
 		return
-	var roll := _roll_attack(w, enemy)
+	var roll := _roll_attack(w, enemy, false)
 	var hit: bool = roll["net"] > 0
 	_spawn_popup(w.position, "OVERWATCH!", Color("8fd8ff"))
 	await get_tree().create_timer(0.35).timeout
-	_play_attack_anim(w)
+	_play_attack_anim(w, false)
 	await _fire_tracer(w, enemy, hit, Color(1.0, 0.9, 0.5))
 	if hit:
 		var res := _apply_attack_result(enemy, roll)
@@ -1818,14 +1934,14 @@ func _overwatch_shot(w: Unit, enemy: Unit) -> void:
 
 func _enemy_attack(enemy: Unit, target: Unit) -> void:
 	# Kurzer "Biss"-Ausfall in Richtung Ziel.
-	_play_attack_anim(enemy)
+	_play_attack_anim(enemy, true)
 	var origin := enemy.position
 	var tw := enemy.create_tween()
 	tw.tween_property(enemy, "position", origin.lerp(target.position, 0.35), 0.12)
 	tw.tween_property(enemy, "position", origin, 0.12)
 	await tw.finished
 
-	var roll := _roll_attack(enemy, target)
+	var roll := _roll_attack(enemy, target, true)
 	if roll["net"] > 0:
 		var res := _apply_attack_result(target, roll)
 		if res["hp"] > 0 and not game_over:

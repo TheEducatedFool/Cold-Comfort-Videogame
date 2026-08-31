@@ -20,6 +20,10 @@ static func make(id: String) -> Weapon:
 			return combat_shotgun()
 		"chain_blade":
 			return chain_blade()
+		"pistol":
+			return pistol()
+		"knife":
+			return knife()
 		"drone_claws":
 			return drone_claws()
 		"spitter_acid":
@@ -76,6 +80,25 @@ static func chain_blade() -> Weapon:
 	w.is_melee = true
 	w.ap = 1
 	w.lethal = 1
+	return w
+
+
+## Behelfswaffe ohne besondere Werte (Kamils Playtest-Feedback,
+## 2026-08-31): jeder Kämpfer ohne eigene Fernkampfwaffe bekommt sie, damit
+## er trotzdem schießen kann - reine Reichweite, kein AP/SD/Lethal.
+static func pistol() -> Weapon:
+	var w := Weapon.new()
+	w.weapon_name = "Pistole"
+	w.weapon_range = 6
+	return w
+
+
+## Siehe pistol() - dasselbe Prinzip für den Nahkampf.
+static func knife() -> Weapon:
+	var w := Weapon.new()
+	w.weapon_name = "Kampfmesser"
+	w.weapon_range = 1
+	w.is_melee = true
 	return w
 
 

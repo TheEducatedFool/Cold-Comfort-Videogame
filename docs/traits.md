@@ -27,6 +27,7 @@ implementieren (`range`, `ap`, `sd`, `lethal`). Volle Schadenskette:
 
 | Waffe | Reichweite | AP | SD | Lethal | Traits |
 |---|---:|---:|---:|---:|---|
+| Pistole | 6 | 0 | 0 | 0 | – |
 | Standard-Sturmgewehr | 8 | 0 | 0 | 0 | Dependable |
 | Scharfschützengewehr | 12 | 1 | 0 | 2 | Sniper Scope, Bulky |
 | Schildbrecher-Karabiner | 7 | 0 | 3 | 0 | Rapid Fire |
@@ -34,6 +35,14 @@ implementieren (`range`, `ap`, `sd`, `lethal`). Volle Schadenskette:
 | Kampfmesser | NK | 0 | 0 | 0 | Dependable |
 | Kettenklinge | NK | 1 | 0 | 1 | Brutal |
 | Schockstab | NK | 0 | 2 | 0 | Stagger |
+
+**Jeder Kämpfer trägt beide Waffenarten:** eine Fernkampf- UND eine
+Nahkampfwaffe. Die Klassenwaffe (siehe `classes.md`) sitzt auf der
+jeweiligen Stärke-Seite; die andere Seite bekommt eine schlichte
+Behelfswaffe ohne Traits/Sonderwerte (Pistole bzw. Kampfmesser aus der
+Tabelle oben) – so kann z. B. ein Deadeye im Notfall auch zuschlagen und
+ein Reiver auch mal auf Distanz schießen, ohne dass die Rollenverteilung
+verwässert wird.
 
 ### 0.3 Waffen-Archetypen (Namenskonvention, `gdd.md`)
 

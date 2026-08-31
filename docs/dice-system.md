@@ -41,9 +41,15 @@ Geometrische Erkennung von Deckung/Sichtlinie: `combat.md`.
 ## 3. Nahkampf: Charge, Zone of Control, Flanking
 
 - **Zone of Control (ZoC):** Jeder Kämpfer kontrolliert seine direkt
-  angrenzenden Felder. Ein Kämpfer ist **„Locked In"**, solange er sich
-  im ZoC mindestens eines Gegners befindet – rein räumlicher Zustand,
-  jede Runde neu aus der Position abgelesen.
+  angrenzenden Felder – **inklusive Diagonalen** (alle 8 Nachbarfelder).
+  Ein Kämpfer ist **„Locked In"**, solange er sich im ZoC mindestens eines
+  Gegners befindet – rein räumlicher Zustand, jede Runde neu aus der
+  Position abgelesen. Bewegung bleibt rein orthogonal (`combat.md`/
+  `grid.gd`) – nur die ZoC/Nahkampfreichweite selbst zählt auch Diagonalen.
+- **Kein Schießen aus der ZoC des Ziels:** Steht ein Schütze in der Zone
+  of Control seines Ziels (also direkt daneben, inkl. diagonal), kann er
+  auf DIESES Ziel nicht schießen, sondern nur im Nahkampf angreifen. Ein
+  anderes, nicht angrenzendes Ziel darf er weiterhin normal beschießen.
 - **ZoC-Gegenangriff:** Verlässt eine Einheit freiwillig ein Feld in
   gegnerischer ZoC, kassiert sie dafür einen **kostenlosen
   Nahkampfangriff** dieses Gegners mit dessen normalem
