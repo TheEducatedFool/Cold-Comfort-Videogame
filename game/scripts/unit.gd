@@ -8,6 +8,11 @@ extends Node3D
 
 signal move_finished
 
+## Kenney "Prototype Kit" Platzhalter-Figur für Soldaten (CC0, siehe
+## game/assets/kenney_prototype/License.txt). Kein passendes Kreatur-
+## Modell im Kit für den Swarm - der bleibt eine einfache Kugel.
+const FIGURE_MODEL := preload("res://assets/kenney_prototype/figurine.glb")
+
 enum Faction { PLAYER, SWARM }
 
 var unit_name: String = ""
@@ -32,15 +37,15 @@ var max_shield: int = 0
 var shield: int = 0
 var armor: int = 0
 
-# --- Angriff ---------------------------------------------------------------
-var base_aim: int = 80        # Grund-Trefferchance in %
-var aim_falloff: float = 2.0  # Abzug pro Feld Entfernung
-var dmg_min: int = 1
-var dmg_max: int = 3
-var ap: int = 0               # Panzerbrech-Wert
-var lethal: int = 0           # Tödlich-Wert
-var attack_range: int = 10    # in Feldern; 1 = Nahkampf
-var move_range: int = 5       # Felder pro Bewegungs-Aktion
+# --- Angriff (docs/dice-system.md, docs/classes.md Abschnitt 8) -----------
+# Fernkampf/Nahkampf/Verteidigung: 1-10, Zielwert für den jeweiligen
+# Würfelpool ("Wurf <= Wert = Erfolg"). Die eigentliche Waffe (Reichweite,
+# AP/SD/Lethal) steckt in 'weapon', nicht direkt auf der Einheit.
+var ranged: int = 5
+var melee: int = 5
+var defense: int = 5
+var weapon: Weapon
+var move_range: int = 6       # Felder pro Bewegungs-Aktion (einheitlich 6)
 var actions: int = 0          # verbleibende Aktionen in diesem Zug
 
 # --- Status & Fähigkeiten --------------------------------------------------
@@ -66,35 +71,32 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 	max_shield = stats.get("shield", 0)
 	shield = max_shield
 	armor = stats.get("armor", 0)
-	base_aim = stats.get("aim", 80)
-	aim_falloff = stats.get("falloff", 2.0)
-	dmg_min = stats.get("dmg_min", 1)
-	dmg_max = stats.get("dmg_max", 3)
-	ap = stats.get("ap", 0)
-	lethal = stats.get("lethal", 0)
-	attack_range = stats.get("range", 10)
-	move_range = stats.get("move", 5)
+	ranged = stats.get("ranged", 5)
+	melee = stats.get("melee", 5)
+	defense = stats.get("defense", 5)
+	weapon = Weapons.make(stats.get("weapon", "standard_rifle"))
+	move_range = stats.get("move", 6)
 	sentry = stats.get("sentry", false)
 	abilities = stats.get("abilities", [])
 
-	# Platzhalter-Körper: Kapsel für Soldaten, gedrungene Kugel für den Swarm.
-	var body := MeshInstance3D.new()
+	# Platzhalter-Körper: Kenney-Figur für Soldaten, gedrungene Kugel für
+	# den Swarm (kein passendes Kreatur-Modell im Prototype Kit).
 	if faction == Faction.SWARM:
+		var body := MeshInstance3D.new()
 		var blob := SphereMesh.new()
 		blob.radius = 0.55
 		blob.height = 0.9
 		body.mesh = blob
 		body.position.y = 0.45
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		body.material_override = mat
+		add_child(body)
 	else:
-		var capsule := CapsuleMesh.new()
-		capsule.radius = 0.4
-		capsule.height = 1.6
-		body.mesh = capsule
-		body.position.y = 0.8
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	body.material_override = mat
-	add_child(body)
+		var figure := FIGURE_MODEL.instantiate()
+		figure.scale = Vector3.ONE * 2.2
+		add_child(figure)
+		_tint_all(figure, color)
 
 	# Rigger-Drohne: kleiner schwebender Würfel, der neben der Einheit wippt.
 	if abilities.has("mend") or abilities.has("shock"):
@@ -139,6 +141,18 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 	hp_label.pixel_size = 0.008
 	add_child(hp_label)
 	_update_visuals()
+
+
+## Setzt die Materialfarbe aller MeshInstance3D-Kindknoten rekursiv - die
+## importierten Kenney-Modelle zeigen sonst alle dieselbe geteilte
+## Prototype-Textur statt der Team-/Einheitenfarbe.
+func _tint_all(node: Node, color: Color) -> void:
+	if node is MeshInstance3D:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		node.material_override = mat
+	for c in node.get_children():
+		_tint_all(c, color)
 
 
 func is_alive() -> bool:

@@ -20,29 +20,23 @@ func _init() -> void:
 	# Wand bei (5,5); Ziel (6,5); Schuetze im Westen (2,5) -> volle Deckung
 	print("volle Deckung: ", Combat.cover_malus(g, Vector2i(2, 5), Vector2i(6, 5)) == 40)
 
-	# Bugfix M5+: Ziel (6,5) direkt hinter der Wand (5,5) ist jetzt komplett
-	# unsichtbar -> kein Schuss möglich, nicht mehr "32% durch die Wand".
-	var s := Unit.new()
-	s.cell = Vector2i(2, 5); s.base_aim = 80; s.aim_falloff = 2.0; s.attack_range = 10
-	var t := Unit.new()
-	t.cell = Vector2i(6, 5)
-	print("kein Schuss durch echte Wand hindurch: ", Combat.hit_chance(s, t, g) == -1)
-	# Ausser Reichweite
-	s.attack_range = 3
-	print("ausser Reichweite -1: ", Combat.hit_chance(s, t, g) == -1)
-	s.free(); t.free()
+	# Bugfix M5+: Ziel (6,5) direkt hinter der Wand (5,5) bleibt komplett
+	# unsichtbar (weiterhin gueltig, unabhaengig vom Trefferauflösungs-System).
+	print("kein Schuss durch echte Wand hindurch: ", \
+		Combat.line_of_sight(g, Vector2i(2, 5), Vector2i(6, 5)) == false)
 
-	# Volle Deckung bleibt als eigenständige Mechanik nutzbar: Wand liegt am
+	# Volle Deckung bleibt als eigenstaendige Mechanik nutzbar: Wand liegt am
 	# Nachbarfeld des Ziels (nicht auf der Schusslinie selbst) -> Ziel bleibt
-	# sichtbar und treffbar, nur mit Abzug. aim 80, falloff 2.0, Distanz
-	# sqrt(20)=4.47, volle Deckung -> 80-40-int(8.94) = 32.
+	# sichtbar, nur mit Deckungs-Abzug.
 	var g2 := GridLogic.new(12, 12)
 	g2.blocked[Vector2i(6, 4)] = 2.2  # Wand nördlich neben dem Ziel
-	var s2 := Unit.new()
-	s2.cell = Vector2i(2, 3); s2.base_aim = 80; s2.aim_falloff = 2.0; s2.attack_range = 10
-	var t2 := Unit.new()
-	t2.cell = Vector2i(6, 5)
-	print("volle Deckung neben Ziel blockt Sicht nicht, nur Trefferchance (32): ", \
-		Combat.line_of_sight(g2, s2.cell, t2.cell) == true and Combat.hit_chance(s2, t2, g2) == 32)
-	s2.free(); t2.free()
+	print("volle Deckung neben Ziel blockt Sicht nicht, nur den Bonuswuerfel: ", \
+		Combat.line_of_sight(g2, Vector2i(2, 3), Vector2i(6, 5)) == true \
+		and Combat.cover_malus(g2, Vector2i(2, 3), Vector2i(6, 5)) == Combat.FULL_COVER_MALUS)
+
+	# Wuerfelpool-Bonusschema (dice-system.md Abschnitt 2): keine Deckung
+	# +2, leichte Deckung +1, volle Deckung +0.
+	print("Bonuswuerfel keine Deckung: ", Combat.cover_bonus_dice(0) == 2)
+	print("Bonuswuerfel leichte Deckung: ", Combat.cover_bonus_dice(Combat.HALF_COVER_MALUS) == 1)
+	print("Bonuswuerfel volle Deckung: ", Combat.cover_bonus_dice(Combat.FULL_COVER_MALUS) == 0)
 	quit()

@@ -1,12 +1,21 @@
 extends Node3D
 
-## COLD COMFORT – Prototyp, Meilenstein 4
+## COLD COMFORT – Prototyp, Würfelpool-Umbau (M2/M3)
 ## ---------------------------------------
-## Neu: komplettes Startquartett (Kane, Roan, Okafor, Reyes), Fähigkeiten
-## auf Tasten 1/2 (Slug Rush, Bulwark Stance, Mend, Shock), ein neuer
-## Fernkampf-Gegner (Spitter), drehbare Kamera (Q/E) und einfache
-## Animationen (Tracer-Schüsse, Treffer-Zucken, Todes-Schrumpfen).
+## Kampfauflösung läuft jetzt über das Würfelpool-System aus
+## docs/dice-system.md (siehe combat.gd) statt über Prozent-Trefferchancen.
+## Roster: die 5 aktuellen Klassen (Breacher/Deadeye/Handler/Heavy/Reiver,
+## siehe docs/classes.md) als Platzhalter-Einheiten statt der 4 alten
+## Story-Charaktere. Fähigkeiten auf Tasten 1/2 (Slug Rush, Bulwark Stance,
+## Mend, Shock – Zuordnung provisorisch, echte Klassen-Grundfähigkeiten
+## kommen erst in M7), Fernkampf-Gegner (Spitter), drehbare Kamera (Q/E)
+## und einfache Animationen (Tracer-Schüsse, Treffer-Zucken, Todes-
+## Schrumpfen).
 ##
+## Nahkampf-Angriffe laufen bereits über den gleichen Würfelpool (Basis-
+## Pool 3, Ziel-Feld = Nahkampf-Stat), aber noch OHNE die M4-Boni
+## (Charge/Zone-of-Control-Gegenangriff/Flanking) – die kommen erst mit
+## dem Nahkampf-Meilenstein.
 ## Steuerung:
 ##   Linksklick grünes Feld     -> ausgewählte Einheit bewegt sich (1 Aktion)
 ##   Linksklick auf Gegner      -> schießen, falls möglich (1 Aktion)
@@ -23,10 +32,15 @@ const GRID_W := 12
 const GRID_H := 12
 const TILE := 2.0
 const ACTIONS_PER_TURN := 2
-const OVERWATCH_MALUS := 20   # Trefferabzug für Reaktionsschüsse (außer Sentry)
 
 const CAM_RADIUS := 23.0
 const CAM_HEIGHT := 18.0
+
+# Kenney "Prototype Kit" Platzhalter-Modelle (CC0, siehe
+# game/assets/kenney_prototype/License.txt).
+const MODEL_FLOOR := preload("res://assets/kenney_prototype/floor-square.glb")
+const MODEL_WALL := preload("res://assets/kenney_prototype/wall.glb")
+const MODEL_CRATE := preload("res://assets/kenney_prototype/crate.glb")
 
 const MEND_RANGE := 8.0
 const MEND_HEAL := 2
@@ -51,47 +65,54 @@ const OBSTACLES := {
 	Vector2i(5, 9): 1.0, Vector2i(1, 4): 1.0,
 }
 
-# Kampfwerte. Schadensmodell v2: Schild (+1/Runde) -> Panzerung -> HP;
-# Schaden als Range, AP senkt Panzerung, Tödlich wirkt nur bei Durchschlag.
+# Kampfwerte der 5 Klassen (docs/classes.md Abschnitt 8, exakte
+# Basiswerte) plus Startwaffe (docs/traits.md 0.2, siehe weapons.gd).
+# Schild ist noch kein Klassen-Basiswert (kommt später über
+# Werkstatt-Ausrüstung, docs/gdd.md) - Platzhalter 0 für alle.
+# Fähigkeiten-Zuordnung ist provisorisch (bestehende 4 Fähigkeiten aus dem
+# alten Prototyp, thematisch passend verteilt) - echte Klassen-
+# Grundfähigkeiten pro docs/skills.md kommen erst in M7.
 const STATS_BREACHER := {
-	"hp": 5, "shield": 1, "armor": 1,
-	"aim": 90, "falloff": 8.0,
-	"dmg_min": 2, "dmg_max": 4, "ap": 0, "lethal": 1,
-	"range": 8, "move": 5,
+	"hp": 4, "shield": 0, "armor": 1,
+	"ranged": 6, "melee": 7, "defense": 3,
+	"move": 6, "weapon": "combat_shotgun",
 	"abilities": ["slug_rush"],
 }
 const STATS_DEADEYE := {
-	"hp": 4, "shield": 2, "armor": 0,
-	"aim": 80, "falloff": 1.0,
-	"dmg_min": 1, "dmg_max": 3, "ap": 1, "lethal": 1,
-	"range": 14, "move": 4,
-	"sentry": true,  # Kern-Passiv: Overwatch ohne Reaktions-Malus
+	"hp": 4, "shield": 0, "armor": 1,
+	"ranged": 7, "melee": 4, "defense": 5,
+	"move": 6, "weapon": "sniper_rifle",
+	"sentry": true,  # Kern-Passiv: siehe TODO Design-Entscheidung bei _overwatch_shot
 }
-const STATS_WARDEN := {
-	"hp": 5, "shield": 1, "armor": 2,
-	"aim": 80, "falloff": 2.0,
-	"dmg_min": 1, "dmg_max": 3, "ap": 0, "lethal": 0,
-	"range": 9, "move": 3,
-	"abilities": ["bulwark"],
-}
-const STATS_RIGGER := {
-	"hp": 4, "shield": 1, "armor": 0,
-	"aim": 75, "falloff": 2.0,
-	"dmg_min": 1, "dmg_max": 2, "ap": 0, "lethal": 0,
-	"range": 7, "move": 5,
+const STATS_HANDLER := {
+	"hp": 5, "shield": 0, "armor": 1,
+	"ranged": 4, "melee": 4, "defense": 7,
+	"move": 6, "weapon": "standard_rifle",
 	"abilities": ["mend", "shock"],
 }
+const STATS_HEAVY := {
+	"hp": 5, "shield": 0, "armor": 2,
+	"ranged": 7, "melee": 3, "defense": 3,
+	"move": 6, "weapon": "heavy_machine_gun",
+	"abilities": ["bulwark"],
+}
+const STATS_REIVER := {
+	"hp": 5, "shield": 0, "armor": 0,
+	"ranged": 5, "melee": 7, "defense": 5,
+	"move": 6, "weapon": "chain_blade",
+}
+
+# Swarm-Werte: noch nicht in den Docs vorgegeben - TODO Balancing, grob an
+# Handler-Niveau bzw. niedriger orientiert (prototype-plan.md M2).
 const STATS_DRONE := {
 	"hp": 3, "shield": 0, "armor": 1,
-	"aim": 75, "falloff": 0.0,
-	"dmg_min": 1, "dmg_max": 3, "ap": 0, "lethal": 0,
-	"range": 1, "move": 4,
+	"ranged": 3, "melee": 4, "defense": 3,
+	"move": 6, "weapon": "drone_claws",
 }
 const STATS_SPITTER := {
 	"hp": 2, "shield": 0, "armor": 0,
-	"aim": 70, "falloff": 1.0,
-	"dmg_min": 1, "dmg_max": 2, "ap": 0, "lethal": 0,
-	"range": 7, "move": 3,
+	"ranged": 4, "melee": 3, "defense": 3,
+	"move": 6, "weapon": "spitter_acid",
 }
 
 const SHIP_TURN_LINES := [
@@ -157,7 +178,6 @@ var ability_buttons: Array[Button] = []
 # Gemeinsame Materialien
 var mat_floor_a: StandardMaterial3D
 var mat_floor_b: StandardMaterial3D
-var mat_obstacle: StandardMaterial3D
 var mat_highlight: StandardMaterial3D
 var mat_hover: StandardMaterial3D
 var mat_target: StandardMaterial3D
@@ -191,8 +211,6 @@ func _make_materials() -> void:
 	mat_floor_a.albedo_color = Color("232a38")
 	mat_floor_b = StandardMaterial3D.new()
 	mat_floor_b.albedo_color = Color("1b2130")
-	mat_obstacle = StandardMaterial3D.new()
-	mat_obstacle.albedo_color = Color("434f66")
 
 	mat_highlight = _unshaded(Color(0.35, 0.85, 0.5, 0.3))
 	mat_hover = _unshaded(Color(1.0, 1.0, 1.0, 0.25))
@@ -211,6 +229,16 @@ func _unshaded(color: Color) -> StandardMaterial3D:
 	return mat
 
 
+## Setzt das Material aller MeshInstance3D-Kindknoten rekursiv - für
+## importierte Kenney-Modelle, die sonst alle dieselbe geteilte
+## Prototype-Textur zeigen (z. B. das Boden-Schachbrettmuster).
+func _tint_all(node: Node, mat: StandardMaterial3D) -> void:
+	if node is MeshInstance3D:
+		node.material_override = mat
+	for c in node.get_children():
+		_tint_all(c, mat)
+
+
 func _build_grid_logic() -> void:
 	grid = GridLogic.new(GRID_W, GRID_H)
 	for c in OBSTACLES:
@@ -221,20 +249,26 @@ func _build_floor() -> void:
 	for x in GRID_W:
 		for y in GRID_H:
 			var c := Vector2i(x, y)
-			var tile := MeshInstance3D.new()
-			var box := BoxMesh.new()
 			if OBSTACLES.has(c):
 				var h: float = OBSTACLES[c]
-				box.size = Vector3(TILE * 0.96, h, TILE * 0.96)
-				tile.mesh = box
-				tile.material_override = mat_obstacle
-				tile.position = Vector3(x * TILE, h / 2.0 - 0.2, y * TILE)
+				var inst: Node3D
+				# Kenney-Modelle sind an der Basis pivotiert (Y=0 = Boden),
+				# ihre AABB in der Ursprungsgröße bestimmt den Skalierungsfaktor
+				# auf die Zielmaße (Feldbreite x Höhe x Feldtiefe).
+				if h >= Combat.FULL_COVER_HEIGHT:
+					inst = MODEL_WALL.instantiate()
+					inst.scale = Vector3((TILE * 0.96) / 0.2, h, TILE * 0.96)
+				else:
+					inst = MODEL_CRATE.instantiate()
+					inst.scale = Vector3((TILE * 0.8) / 0.5, h / 0.5, TILE * 0.8)
+				inst.position = Vector3(x * TILE, 0.0, y * TILE)
+				add_child(inst)
 			else:
-				box.size = Vector3(TILE * 0.98, 0.2, TILE * 0.98)
-				tile.mesh = box
-				tile.material_override = mat_floor_a if (x + y) % 2 == 0 else mat_floor_b
-				tile.position = Vector3(x * TILE, -0.1, y * TILE)
-			add_child(tile)
+				var tile := MODEL_FLOOR.instantiate()
+				tile.scale = Vector3(TILE * 0.98, 1.0, TILE * 0.98)
+				tile.position = Vector3(x * TILE, 0.0, y * TILE)
+				add_child(tile)
+				_tint_all(tile, mat_floor_a if (x + y) % 2 == 0 else mat_floor_b)
 
 	hover_marker = _make_quad(mat_hover, 0.03)
 	hover_marker.visible = false
@@ -306,11 +340,14 @@ func _rotate_camera(dir: int) -> void:
 
 
 func _spawn_units() -> void:
-	# Das Startquartett aus crew.md – Werte siehe STATS_* oben.
-	_add_unit("Kane", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, Vector2i(1, 1))
-	_add_unit("Roan", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, Vector2i(1, 3))
-	_add_unit("Okafor", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_WARDEN, Vector2i(2, 2))
-	_add_unit("Reyes", Unit.Faction.PLAYER, Color("c9b458"), STATS_RIGGER, Vector2i(0, 2))
+	# Platzhalter-Trupp aus den 5 aktuellen Klassen (docs/classes.md) -
+	# noch keine benannten Rekruten (kommt mit dem Rekrutierungs-Pool
+	# später), Werte siehe STATS_* oben.
+	_add_unit("Breacher", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, Vector2i(1, 1))
+	_add_unit("Deadeye", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, Vector2i(1, 3))
+	_add_unit("Handler", Unit.Faction.PLAYER, Color("c9b458"), STATS_HANDLER, Vector2i(0, 2))
+	_add_unit("Heavy", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_HEAVY, Vector2i(2, 2))
+	_add_unit("Reiver", Unit.Faction.PLAYER, Color("8a6f9e"), STATS_REIVER, Vector2i(0, 0))
 	# Der Swarm: Nahkampf-Drohnen und Fernkampf-Spitter.
 	_add_unit("Drohne A", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(10, 10))
 	_add_unit("Drohne B", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(11, 6))
@@ -347,7 +384,7 @@ func _build_ui() -> void:
 	margin.add_child(vbox)
 
 	var title := Label.new()
-	title.text = "COLD COMFORT – Prototyp M4"
+	title.text = "COLD COMFORT – Prototyp (Würfelpool)"
 	title.add_theme_font_size_override("font_size", 22)
 	vbox.add_child(title)
 
@@ -459,7 +496,7 @@ func _occupied_cells(except: Unit) -> Dictionary:
 	return result
 
 
-## Zusätzliche Deckungsquellen für ein Ziel: Okafors Bulwark Stance macht
+## Zusätzliche Deckungsquellen für ein Ziel: Bulwark Stance (Heavy) macht
 ## ihr Feld zu hoher Deckung – aber nur für verbündete Ziele.
 func _extra_cover_for(target: Unit) -> Dictionary:
 	var result: Dictionary = {}
@@ -473,6 +510,17 @@ func _extra_cover_for(target: Unit) -> Dictionary:
 
 func _can_shoot(u: Unit) -> bool:
 	return u.actions > 0 or u.free_shot
+
+
+## Kann 'attacker' 'target' mit seiner aktuellen Waffe angreifen?
+## Nahkampf: angrenzendes Feld (Manhattan-Distanz 1). Fernkampf: Sichtlinie
+## und innerhalb der Waffenreichweite.
+func _can_attack(attacker: Unit, target: Unit) -> bool:
+	if attacker.weapon.is_melee:
+		return _manhattan(attacker.cell, target.cell) == 1
+	if not Combat.line_of_sight(grid, attacker.cell, target.cell):
+		return false
+	return _dist(attacker.cell, target.cell) <= float(attacker.weapon.weapon_range)
 
 
 func _can_move(u: Unit) -> bool:
@@ -567,10 +615,10 @@ func _handle_click(screen_pos: Vector2) -> void:
 		_select(u)
 		return
 
-	# 2) Gegner angeklickt -> schießen, falls möglich
+	# 2) Gegner angeklickt -> angreifen, falls möglich
 	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
-		if Combat.hit_chance(selected, u, grid) > 0 and _commit(selected):
-			_player_shoot(selected, u)
+		if _can_attack(selected, u) and _commit(selected):
+			_player_attack(selected, u)
 		return
 
 	# 3) Erreichbares Feld angeklickt -> bewegen
@@ -591,7 +639,7 @@ func _try_move_selected(c: Vector2i) -> bool:
 		# Slug Rush: Bewegung ist Teil der Fähigkeit, Freischuss wird scharf.
 		selected.rush_move = false
 		selected.free_shot = true
-		ship_label.text = "Ship: \"Kane rennt. Ich empfehle allen anderen: aus dem Weg.\""
+		ship_label.text = "Ship: \"Vorwärtssprint registriert. Ich empfehle allen anderen: aus dem Weg.\""
 	else:
 		selected.actions -= 1
 	if selected.bulwark:
@@ -637,28 +685,30 @@ func _update_hover(screen_pos: Vector2) -> void:
 	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
 		target_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
 		target_marker.visible = true
-		var chance := Combat.hit_chance(selected, u, grid)
-		if chance < 0:
-			info_label.text = "Ziel: %s – keine Sichtlinie oder außer Reichweite" % u.unit_name
+		if not _can_attack(selected, u):
+			info_label.text = "Ziel: %s – keine Sichtlinie, außer Reichweite oder nicht angrenzend" % u.unit_name
 		else:
-			var cm := Combat.cover_malus(grid, selected.cell, u.cell)
-			var cover_txt := " · FLANKIERT!"
-			if cm == Combat.FULL_COVER_MALUS:
-				cover_txt = " · volle Deckung"
-			elif cm == Combat.HALF_COVER_MALUS:
-				cover_txt = " · halbe Deckung"
-			var dmg_txt := "Schaden %d–%d" % [selected.dmg_min, selected.dmg_max]
-			if selected.ap > 0:
-				dmg_txt += " · AP %d" % selected.ap
-			if selected.lethal > 0:
-				dmg_txt += " · Tödlich %d" % selected.lethal
+			var w := selected.weapon
+			var cover_txt := ""
+			var bonus := 0
+			if not w.is_melee:
+				var cm := Combat.cover_malus(grid, selected.cell, u.cell, _extra_cover_for(u))
+				bonus = Combat.cover_bonus_dice(cm)
+				if cm == Combat.FULL_COVER_MALUS:
+					cover_txt = " · volle Deckung"
+				elif cm == Combat.HALF_COVER_MALUS:
+					cover_txt = " · halbe Deckung"
+				else:
+					cover_txt = " · FLANKIERT!"
+			var pool := 3 + bonus
+			var dmg_txt := "AP %d · SD %d · Tödlich %d" % [w.ap, w.sd, w.lethal]
 			var def_txt := ""
 			if u.shield > 0:
 				def_txt += " · Ziel-Schild %d" % u.shield
 			if u.armor > 0:
 				def_txt += " · Ziel-Panzerung %d" % u.armor
-			info_label.text = "Ziel: %s – Trefferchance %d%%%s · %s%s" \
-				% [u.unit_name, chance, cover_txt, dmg_txt, def_txt]
+			info_label.text = "Ziel: %s – %d Würfel%s · %s%s" \
+				% [u.unit_name, pool, cover_txt, dmg_txt, def_txt]
 	elif highlight_nodes.has(c):
 		hover_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
 		hover_marker.visible = true
@@ -713,7 +763,7 @@ func _use_ability_slot(slot: int) -> void:
 				return
 			selected.actions -= 1
 			selected.set_bulwark(true)
-			ship_label.text = "Ship: \"Okafor ist jetzt offiziell Teil der Architektur.\""
+			ship_label.text = "Ship: \"Bulwark-Haltung aktiv. Offiziell Teil der Architektur.\""
 			_after_player_action()
 		"mend":
 			pending_ability = "mend"
@@ -774,7 +824,7 @@ func _resolve_pending_ability(target: Unit) -> void:
 			_kill_unit(target)
 		else:
 			target.set_shocked(true)
-		ship_label.text = "Ship: \"Zzzt. Das war Reyes' Drohne. Ich applaudiere innerlich.\""
+		ship_label.text = "Ship: \"Zzzt. Elektroschock zugestellt. Ich applaudiere innerlich.\""
 		_update_labels()
 		_refresh_highlights()
 		_after_player_action()
@@ -919,7 +969,7 @@ func _refresh_los_debug() -> void:
 				continue
 			var mat := mat_los_blocked
 			if Combat.line_of_sight(grid, selected.cell, c):
-				if _dist(selected.cell, c) <= float(selected.attack_range):
+				if _dist(selected.cell, c) <= float(selected.weapon.weapon_range):
 					mat = mat_los_ok
 				else:
 					mat = mat_los_far
@@ -982,7 +1032,7 @@ func _flinch(u: Unit) -> void:
 	tw.tween_property(u, "position", origin, 0.1)
 
 
-## Reyes' Drohne fliegt zum Ziel und zurück (Mend/Shock).
+## Handlers Drohne fliegt zum Ziel und zurück (Mend/Shock).
 func _drone_flight(from_u: Unit, to_u: Unit) -> void:
 	anim_busy = true
 	var drone := MeshInstance3D.new()
@@ -1007,11 +1057,31 @@ func _drone_flight(from_u: Unit, to_u: Unit) -> void:
 
 # --- Kampf -----------------------------------------------------------------
 
-## Verrechnet einen gelandeten Treffer: würfelt den Schaden, schickt ihn
-## durch Schild -> Panzerung -> HP, zeigt Popups und räumt Tote weg.
-func _apply_attack(attacker: Unit, target: Unit) -> Dictionary:
-	var dmg_roll := Combat.roll_damage(attacker)
-	var res := Combat.resolve_damage(dmg_roll, attacker.ap, attacker.lethal, target.shield, target.armor)
+## Würfelt einen kompletten Angriff (Fernkampf ODER Nahkampf) nach dem
+## Würfelpool-System durch (dice-system.md), wendet aber noch NICHTS an -
+## reine Vorausberechnung, damit die Tracer-Animation vorher weiß, ob sie
+## als Treffer oder Fehlschuss fliegen soll. "net" > 0 heißt: der Angriff
+## hat die Verteidigung durchbrochen (auch wenn am Ende 0 HP-Schaden
+## durchkommt, weil Panzerung/Schild alles auffangen).
+## Nahkampf-Boni (Charge/ZoC/Flanking) fehlen noch - kommen erst in M4.
+func _roll_attack(attacker: Unit, target: Unit) -> Dictionary:
+	var w := attacker.weapon
+	var bonus := 0
+	if not w.is_melee:
+		var cm := Combat.cover_malus(grid, attacker.cell, target.cell, _extra_cover_for(target))
+		bonus = Combat.cover_bonus_dice(cm)
+	var skill := attacker.melee if w.is_melee else attacker.ranged
+	var atk := Combat.roll_pool(3 + bonus, skill)
+	var def := Combat.roll_pool(3, target.defense)
+	var net := Combat.net_successes(atk["hits"], def["hits"])
+	var res := Combat.resolve_net_damage(net, w.ap, w.sd, w.lethal, target.shield, target.armor)
+	res["net"] = net
+	return res
+
+
+## Wendet ein bereits gewürfeltes Ergebnis (aus _roll_attack) an: Schaden,
+## Popup, Flinch, ggf. Tod.
+func _apply_attack_result(target: Unit, res: Dictionary) -> Dictionary:
 	target.take_hit(res["shield"], res["hp"])
 	if res["shield"] > 0 or res["hp"] > 0:
 		_flinch(target)
@@ -1034,20 +1104,20 @@ func _show_hit_popup(target: Unit, res: Dictionary) -> void:
 		_spawn_popup(target.position, "ABGEPRALLT", Color("cfd6e4"))
 
 
-func _player_shoot(shooter: Unit, target: Unit) -> void:
-	var chance := Combat.hit_chance(shooter, target, grid)
-	if shooter.free_shot:
-		shooter.free_shot = false  # Slug-Rush-Freischuss verbraucht
+func _player_attack(attacker: Unit, target: Unit) -> void:
+	var roll := _roll_attack(attacker, target)
+	if attacker.free_shot:
+		attacker.free_shot = false  # Slug-Rush-Freischuss verbraucht
 	else:
-		shooter.actions -= 1
+		attacker.actions -= 1
 	target_marker.visible = false
 
-	var hit := randi() % 100 < chance
+	var hit: bool = roll["net"] > 0
 	anim_busy = true
-	await _fire_tracer(shooter, target, hit, Color(1.0, 0.9, 0.5))
+	await _fire_tracer(attacker, target, hit, Color(1.0, 0.9, 0.5))
 	anim_busy = false
 	if hit:
-		var res := _apply_attack(shooter, target)
+		var res := _apply_attack_result(target, roll)
 		if res["killed"] and not game_over:
 			ship_label.text = SHIP_KILL_LINES.pick_random()
 	else:
@@ -1198,7 +1268,7 @@ func _build_enemy_queue() -> void:
 	enemy_queue.clear()
 	var drones: Array[Unit] = []
 	for e in _enemies():
-		if e.attack_range <= 1:
+		if e.weapon.is_melee:
 			drones.append(e)
 		else:
 			enemy_queue.append([e])
@@ -1247,7 +1317,7 @@ func _swarm_step() -> void:
 			continue
 		if _players().is_empty():
 			return
-		if enemy.attack_range <= 1:
+		if enemy.weapon.is_melee:
 			await _drone_activation(enemy)
 		else:
 			await _spitter_activation(enemy)
@@ -1331,7 +1401,7 @@ func _drone_activation(enemy: Unit) -> void:
 ## eine Schussposition anlaufen und dann spucken.
 func _spitter_activation(enemy: Unit) -> void:
 	var best := _best_shot_target(enemy)
-	if best["chance"] < 0:
+	if best["score"] < 0:
 		# Keine Schusslinie: Feld mit der besten Schuss-Aussicht anlaufen.
 		var occ := _occupied_cells(enemy)
 		var reach := grid.reachable(enemy.cell, enemy.move_range, occ)
@@ -1353,8 +1423,8 @@ func _spitter_activation(enemy: Unit) -> void:
 		if not units.has(enemy):
 			return
 		best = _best_shot_target(enemy)
-	if best["chance"] >= 0 and best["target"] != null:
-		await _enemy_ranged_attack(enemy, best["target"], best["chance"])
+	if best["score"] >= 0 and best["target"] != null:
+		await _enemy_ranged_attack(enemy, best["target"])
 
 
 func _nearest_player(from: Vector2i) -> Unit:
@@ -1366,38 +1436,47 @@ func _nearest_player(from: Vector2i) -> Unit:
 	return result
 
 
-## Bester Spieler als Ziel (höchste Trefferchance) vom aktuellen Feld aus.
+## Bester Spieler als Ziel vom aktuellen Feld aus. Grobe KI-Heuristik ohne
+## echte Erfolgswahrscheinlichkeit: größerer eigener Würfelpool und ein
+## schwächer verteidigendes Ziel sind besser (TODO Balancing: eine
+## Bewertung über die tatsächliche Trefferwahrscheinlichkeit wäre
+## genauer, hier bewusst einfach gehalten).
 func _best_shot_target(sp: Unit) -> Dictionary:
 	var bt: Unit = null
-	var bc := -1
+	var bs := -1
 	for p in _players():
-		var ch := Combat.hit_chance(sp, p, grid, _extra_cover_for(p))
-		if ch > bc:
-			bc = ch
+		if not _can_attack(sp, p):
+			continue
+		var cm := Combat.cover_malus(grid, sp.cell, p.cell, _extra_cover_for(p))
+		var pool := 3 + Combat.cover_bonus_dice(cm)
+		var score := pool * 2 - p.defense
+		if score > bs:
+			bs = score
 			bt = p
-	return {"target": bt, "chance": bc}
+	return {"target": bt, "score": bs}
 
 
-## Wie gut könnte dieser Spitter von Feld 'from' aus schießen? (-1 = gar nicht)
+## Wie gut könnte dieser Spitter von Feld 'from' aus schießen? (-1 = gar
+## nicht erreichbar) Gleiche Heuristik wie _best_shot_target.
 func _spitter_shot_score(from: Vector2i, sp: Unit) -> int:
 	var best := -1
 	for p in _players():
-		if _dist(from, p.cell) > float(sp.attack_range):
+		if _dist(from, p.cell) > float(sp.weapon.weapon_range):
 			continue
 		if not Combat.line_of_sight(grid, from, p.cell):
 			continue
-		var ch := sp.base_aim \
-			- Combat.cover_malus(grid, from, p.cell, _extra_cover_for(p)) \
-			- int(_dist(from, p.cell) * sp.aim_falloff)
-		best = maxi(best, clampi(ch, 5, 95))
+		var cm := Combat.cover_malus(grid, from, p.cell, _extra_cover_for(p))
+		var pool := 3 + Combat.cover_bonus_dice(cm)
+		best = maxi(best, pool * 2 - p.defense)
 	return best
 
 
-func _enemy_ranged_attack(enemy: Unit, target: Unit, chance: int) -> void:
-	var hit := randi() % 100 < chance
+func _enemy_ranged_attack(enemy: Unit, target: Unit) -> void:
+	var roll := _roll_attack(enemy, target)
+	var hit: bool = roll["net"] > 0
 	await _fire_tracer(enemy, target, hit, Color(0.72, 0.91, 0.43))  # Säure
 	if hit:
-		var res := _apply_attack(enemy, target)
+		var res := _apply_attack_result(target, roll)
 		if res["hp"] > 0 and not game_over:
 			ship_label.text = SHIP_HURT_LINES.pick_random()
 	else:
@@ -1412,7 +1491,7 @@ func _overwatchers_seeing(c: Vector2i) -> Array[Unit]:
 	for p in _players():
 		if not p.overwatch:
 			continue
-		if _dist(p.cell, c) > float(p.attack_range):
+		if _dist(p.cell, c) > float(p.weapon.weapon_range):
 			continue
 		if Combat.line_of_sight(grid, p.cell, c):
 			result.append(p)
@@ -1446,21 +1525,22 @@ func _walk_enemy_with_overwatch(enemy: Unit, path: Array[Vector2i]) -> void:
 		i = end_idx + 1
 
 
-## Ein einzelner Reaktionsschuss. Kostet den Overwatch-Status; Malus von
-## -20 auf die Trefferchance – außer für den Sentry (Roans Kern-Passiv).
+## Ein einzelner Reaktionsschuss. Kostet den Overwatch-Status.
+## TODO Design-Entscheidung (prototype-plan.md Arbeitsprinzip 3): ob
+## Reaktionsschüsse im Würfelpool-System einen Bonuswürfel-Malus bekommen,
+## ist noch offen - bis geklärt bewusst OHNE Malus (Sentry-Passiv bleibt
+## bis dahin wirkungslos, statt hier eigenmächtig einen Wert zu erfinden).
 func _overwatch_shot(w: Unit, enemy: Unit) -> void:
-	var chance := Combat.hit_chance(w, enemy, grid)
 	w.set_overwatch(false)
-	if chance < 0:
+	if not _can_attack(w, enemy):
 		return
-	if not w.sentry:
-		chance = clampi(chance - OVERWATCH_MALUS, 5, 95)
+	var roll := _roll_attack(w, enemy)
+	var hit: bool = roll["net"] > 0
 	_spawn_popup(w.position, "OVERWATCH!", Color("8fd8ff"))
 	await get_tree().create_timer(0.35).timeout
-	var hit := randi() % 100 < chance
 	await _fire_tracer(w, enemy, hit, Color(1.0, 0.9, 0.5))
 	if hit:
-		var res := _apply_attack(w, enemy)
+		var res := _apply_attack_result(enemy, roll)
 		if res["killed"] and not game_over:
 			ship_label.text = "Ship: \"Reaktionszeit vorbildlich. Für organische Verhältnisse.\""
 	else:
@@ -1476,9 +1556,9 @@ func _enemy_attack(enemy: Unit, target: Unit) -> void:
 	tw.tween_property(enemy, "position", origin, 0.12)
 	await tw.finished
 
-	var roll := randi() % 100
-	if roll < enemy.base_aim:
-		var res := _apply_attack(enemy, target)
+	var roll := _roll_attack(enemy, target)
+	if roll["net"] > 0:
+		var res := _apply_attack_result(target, roll)
 		if res["hp"] > 0 and not game_over:
 			ship_label.text = SHIP_HURT_LINES.pick_random()
 	else:

@@ -35,9 +35,9 @@ func _process(_d: float) -> bool:
 		var enemies = m._enemies()
 		enemies.shuffle()
 		for e in enemies:
-			if Combat.hit_chance(sel, e, m.grid) > 0:
+			if m._can_attack(sel, e):
 				if m._commit(sel):
-					m._player_shoot(sel, e)
+					m._player_attack(sel, e)
 				return false
 		m._end_activation()
 	elif r < 65:

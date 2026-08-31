@@ -12,12 +12,13 @@ extends RefCounted
 ##   sie blenden keine echten Wände aus, die direkt im Weg stehen.
 ## - Deckung: Ein Hindernis auf einem Nachbarfeld des Ziels, das grob in
 ##   Richtung des Schützen liegt, gibt dem Ziel Deckung.
-##   Niedrig = halbe Deckung (-20 %), hoch = volle Deckung (-40 %).
+##   Niedrig = halbe Deckung, hoch = volle Deckung.
 ##   Steht kein Hindernis dazwischen, ist das Ziel FLANKIERT: kein Abzug.
 ##   'extra_cover' erlaubt zusätzliche, temporäre Deckungsquellen –
-##   z. B. Okafors Bulwark Stance (ihr Feld zählt als hohe Deckung).
-## - Trefferchance = Grundwert des Schützen - Deckung - Entfernungsabzug,
-##   begrenzt auf 5–95 % (nie sicher, nie hoffnungslos).
+##   z. B. Bulwark Stance (das eigene Feld zählt als hohe Deckung).
+## - Trefferauflösung: Würfelpool-System, siehe Abschnitt weiter unten
+##   sowie docs/dice-system.md. Der Deckungs-Malus hier wird über
+##   cover_bonus_dice() in Bonuswürfel übersetzt.
 
 const HALF_COVER_MALUS := 20
 const FULL_COVER_MALUS := 40
@@ -76,48 +77,21 @@ static func cover_malus(grid: GridLogic, shooter: Vector2i, target: Vector2i, ex
 	return best
 
 
-## Würfelt den Waffenschaden des Angreifers (gleichverteilt min–max).
-static func roll_damage(attacker: Unit) -> int:
-	return randi_range(attacker.dmg_min, attacker.dmg_max)
-
-
-## Verrechnet einen Schadenswurf durch die drei Schichten:
-##   1) SCHILD schluckt Schaden zuerst, 1:1.
-##   2) Der Rest wird um die effektive Panzerung reduziert
-##      (Panzerung - AP des Angreifers, min. 0).
-##   3) Dringt danach noch Schaden durch, kommt der TÖDLICH-Wert obendrauf.
-## Ein Treffer kann komplett absorbiert werden – es gibt KEINEN
-## Mindestschaden (beschlossene Design-Regel).
-## Rückgabe: {"shield": Schildschaden, "hp": HP-Schaden}
-static func resolve_damage(roll: int, p_ap: int, p_lethal: int, shield: int, armor: int) -> Dictionary:
-	var to_shield := mini(roll, shield)
-	var rest := roll - to_shield
-	var eff_armor := maxi(armor - p_ap, 0)
-	var to_hp := maxi(rest - eff_armor, 0)
-	if to_hp > 0:
-		to_hp += p_lethal
-	return {"shield": to_shield, "hp": to_hp}
-
-
-## Trefferchance in Prozent – oder -1, wenn der Schuss unmöglich ist
-## (keine Sichtlinie oder außer Reichweite).
-static func hit_chance(shooter: Unit, target: Unit, grid: GridLogic, extra_cover: Dictionary = {}) -> int:
-	if not line_of_sight(grid, shooter.cell, target.cell):
-		return -1
-	var dist := Vector2(shooter.cell).distance_to(Vector2(target.cell))
-	if dist > float(shooter.attack_range):
-		return -1
-	var chance := shooter.base_aim \
-		- cover_malus(grid, shooter.cell, target.cell, extra_cover) \
-		- int(dist * shooter.aim_falloff)
-	return clampi(chance, 5, 95)
+## Bonuswürfel aus dem geometrischen Deckungs-Malus (0/20/40) ableiten –
+## Brücke zwischen der Deckungserkennung oben und dem Würfelpool-
+## Bonusschema (dice-system.md Abschnitt 2): keine Deckung (flankiert)
+## +2, leichte Deckung +1, volle Deckung +0.
+static func cover_bonus_dice(malus: int) -> int:
+	if malus >= FULL_COVER_MALUS:
+		return 0
+	if malus >= HALF_COVER_MALUS:
+		return 1
+	return 2
 
 
 ## ---------------------------------------------------------------------
-## Würfelpool-System (docs/dice-system.md) – löst das Prozent-System oben
-## schrittweise ab (siehe docs/prototype-plan.md). M1: nur die reine
-## Kampfmathe, noch nicht ans Spiel angebunden (kein Cover/Charge-Bezug
-## hier, das kommt erst mit den jeweiligen Meilensteinen M3/M4).
+## Würfelpool-System (docs/dice-system.md) – hat das alte Prozent-System
+## (hit_chance/roll_damage/resolve_damage) ab M3 vollständig abgelöst.
 ##
 ## Regeln (dice-system.md Abschnitt 1, 4, 5):
 ## - d10, Erfolg = Wurf <= Zielwert ("unterboten").
