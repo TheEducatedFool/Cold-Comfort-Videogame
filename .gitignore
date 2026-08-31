@@ -1,0 +1,17 @@
+# Godot-Engine-Binärdateien (groß, keine Projektarbeit, einfach neu herunterladbar)
+Godot_v4.7.2-stable/
+
+# Rohe Asset-Pack-Downloads (Kenney/Synty) – noch nicht ins Spiel integriert
+asset packs/
+
+# Godot-Editor-Cache (Import-/Shader-Cache, wird lokal neu erzeugt)
+.godot/
+
+# Godot-Export-Artefakte
+export.cfg
+export_presets.cfg
+*.translation
+
+# Betriebssystem-Müll
+Thumbs.db
+.DS_Store

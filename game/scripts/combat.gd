@@ -1,0 +1,113 @@
+class_name Combat
+extends RefCounted
+
+## Kampf-Mathematik – bewusst als reine Funktionen ohne eigenen Zustand,
+## damit sie leicht zu testen und später leicht zu erweitern sind.
+##
+## Regeln:
+## - Sichtlinie (Line of Sight): hohe Hindernisse (>= 2 m) blockieren den
+##   Schuss komplett, sobald sie WIRKLICH auf der Linie zwischen Schütze und
+##   Ziel liegen. Drei leicht versetzte Strahlen (Mittellinie + 2 seitlich)
+##   fangen nur das Rasterungs-Problem an Wandkanten ab (siehe unten) –
+##   sie blenden keine echten Wände aus, die direkt im Weg stehen.
+## - Deckung: Ein Hindernis auf einem Nachbarfeld des Ziels, das grob in
+##   Richtung des Schützen liegt, gibt dem Ziel Deckung.
+##   Niedrig = halbe Deckung (-20 %), hoch = volle Deckung (-40 %).
+##   Steht kein Hindernis dazwischen, ist das Ziel FLANKIERT: kein Abzug.
+##   'extra_cover' erlaubt zusätzliche, temporäre Deckungsquellen –
+##   z. B. Okafors Bulwark Stance (ihr Feld zählt als hohe Deckung).
+## - Trefferchance = Grundwert des Schützen - Deckung - Entfernungsabzug,
+##   begrenzt auf 5–95 % (nie sicher, nie hoffnungslos).
+
+const HALF_COVER_MALUS := 20
+const FULL_COVER_MALUS := 40
+const FULL_COVER_HEIGHT := 2.0
+
+
+## Können sich zwei Felder "sehen"? Großzügige Prüfung mit DREI Strahlen:
+## der Mittellinie plus zwei seitlich versetzten Linien (das simuliert das
+## Lehnen um eine Kante). Sichtlinie besteht, sobald EINER der Strahlen
+## frei ist – so blockieren Wandkanten keine Schüsse mehr, die optisch
+## offensichtlich frei wären ("Corner-Clipping"-Problem).
+static func line_of_sight(grid: GridLogic, from: Vector2i, to: Vector2i) -> bool:
+	var a := Vector2(from)
+	var b := Vector2(to)
+	if _ray_clear(grid, a, b, from, to):
+		return true
+	var dir := (b - a).normalized()
+	var perp := Vector2(-dir.y, dir.x) * 0.4
+	if _ray_clear(grid, a + perp, b + perp, from, to):
+		return true
+	return _ray_clear(grid, a - perp, b - perp, from, to)
+
+
+## Ein einzelner Sichtstrahl: die Linie wird in kleinen Schritten abgetastet
+## und jedes berührte Feld auf hohe Hindernisse geprüft. Nur Schütze- und
+## Zielfeld selbst zählen nicht (man blockiert sich nicht selbst die Sicht) –
+## ein echtes Wandfeld direkt daneben, das auf der Linie liegt, blockiert
+## weiterhin (sonst sieht man durch die eigene Deckung hindurch).
+static func _ray_clear(grid: GridLogic, a: Vector2, b: Vector2, from: Vector2i, to: Vector2i) -> bool:
+	var steps := int(a.distance_to(b) * 4.0) + 1
+	for i in range(1, steps):
+		var p := a.lerp(b, float(i) / float(steps))
+		var c := Vector2i(roundi(p.x), roundi(p.y))
+		if c == from or c == to:
+			continue
+		if grid.cover_at(c) >= FULL_COVER_HEIGHT:
+			return false
+	return true
+
+
+## Deckungs-Abzug für einen Schuss von 'shooter' auf 'target' (0 / 20 / 40).
+## 'extra_cover': zusätzliche Deckungsquellen {Feld -> Höhe}, z. B. Bulwark.
+static func cover_malus(grid: GridLogic, shooter: Vector2i, target: Vector2i, extra_cover: Dictionary = {}) -> int:
+	var dir := Vector2(shooter - target).normalized()
+	var best := 0
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n: Vector2i = target + d
+		var h: float = maxf(grid.cover_at(n), float(extra_cover.get(n, 0.0)))
+		if h <= 0.0:
+			continue
+		# Zählt das Hindernis als Deckung gegen DIESEN Schützen?
+		# Nur, wenn es grob in seine Richtung zeigt (Skalarprodukt > 0.3).
+		if Vector2(d).dot(dir) > 0.3:
+			var malus := FULL_COVER_MALUS if h >= FULL_COVER_HEIGHT else HALF_COVER_MALUS
+			best = maxi(best, malus)
+	return best
+
+
+## Würfelt den Waffenschaden des Angreifers (gleichverteilt min–max).
+static func roll_damage(attacker: Unit) -> int:
+	return randi_range(attacker.dmg_min, attacker.dmg_max)
+
+
+## Verrechnet einen Schadenswurf durch die drei Schichten:
+##   1) SCHILD schluckt Schaden zuerst, 1:1.
+##   2) Der Rest wird um die effektive Panzerung reduziert
+##      (Panzerung - AP des Angreifers, min. 0).
+##   3) Dringt danach noch Schaden durch, kommt der TÖDLICH-Wert obendrauf.
+## Ein Treffer kann komplett absorbiert werden – es gibt KEINEN
+## Mindestschaden (beschlossene Design-Regel).
+## Rückgabe: {"shield": Schildschaden, "hp": HP-Schaden}
+static func resolve_damage(roll: int, p_ap: int, p_lethal: int, shield: int, armor: int) -> Dictionary:
+	var to_shield := mini(roll, shield)
+	var rest := roll - to_shield
+	var eff_armor := maxi(armor - p_ap, 0)
+	var to_hp := maxi(rest - eff_armor, 0)
+	if to_hp > 0:
+		to_hp += p_lethal
+	return {"shield": to_shield, "hp": to_hp}
+
+
+## Trefferchance in Prozent – oder -1, wenn der Schuss unmöglich ist
+## (keine Sichtlinie oder außer Reichweite).
+static func hit_chance(shooter: Unit, target: Unit, grid: GridLogic, extra_cover: Dictionary = {}) -> int:
+	if not line_of_sight(grid, shooter.cell, target.cell):
+		return -1
+	var dist := Vector2(shooter.cell).distance_to(Vector2(target.cell))
+	if dist > float(shooter.attack_range):
+		return -1
+	var chance := shooter.base_aim \
+		- cover_malus(grid, shooter.cell, target.cell, extra_cover) \
+		- int(dist * shooter.aim_falloff)
+	return clampi(chance, 5, 95)
