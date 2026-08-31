@@ -111,3 +111,74 @@ static func hit_chance(shooter: Unit, target: Unit, grid: GridLogic, extra_cover
 		- cover_malus(grid, shooter.cell, target.cell, extra_cover) \
 		- int(dist * shooter.aim_falloff)
 	return clampi(chance, 5, 95)
+
+
+## ---------------------------------------------------------------------
+## Würfelpool-System (docs/dice-system.md) – löst das Prozent-System oben
+## schrittweise ab (siehe docs/prototype-plan.md). M1: nur die reine
+## Kampfmathe, noch nicht ans Spiel angebunden (kein Cover/Charge-Bezug
+## hier, das kommt erst mit den jeweiligen Meilensteinen M3/M4).
+##
+## Regeln (dice-system.md Abschnitt 1, 4, 5):
+## - d10, Erfolg = Wurf <= Zielwert ("unterboten").
+## - Natürliche 10 = automatischer Fehlschlag, unabhängig vom Zielwert.
+## - Wurf <= crit_threshold (Standard 1, per Upgrade auf 1-2 erweiterbar)
+##   ist ein kritischer Erfolg UND löst einen zusätzlichen Bonuswürfel aus
+##   (unbegrenzte Kaskade, gilt für Angriffs- und Verteidigungswürfe).
+## ---------------------------------------------------------------------
+
+## Würfelt einen Pool von 'dice' d10 gegen 'target'. 'forced_rolls' ist
+## eine optionale, fest vorgegebene Wurffolge für Tests (der Reihe nach
+## verbraucht, auch für durch Krits ausgelöste Bonuswürfel) – reicht sie
+## nicht aus, wird für die restlichen Würfel echter Zufall verwendet.
+## Ohne 'forced_rolls': komplett echter Zufall.
+## Rückgabe: {"rolls": alle gewürfelten Werte inkl. Bonuswürfel,
+##            "hits": Zahl der Erfolge, "crits": Zahl der Krit-Auslöser}
+static func roll_pool(dice: int, target: int, crit_threshold: int = 1, forced_rolls: Array = []) -> Dictionary:
+	var rolls: Array[int] = []
+	var hits := 0
+	var crits := 0
+	var pending := dice
+	var forced_index := 0
+	while pending > 0:
+		var this_round := pending
+		pending = 0
+		for i in this_round:
+			var r: int
+			if forced_index < forced_rolls.size():
+				r = forced_rolls[forced_index]
+				forced_index += 1
+			else:
+				r = randi_range(1, 10)
+			rolls.append(r)
+			if r == 10:
+				continue
+			if r <= target:
+				hits += 1
+			if r <= crit_threshold:
+				crits += 1
+				pending += 1
+	return {"rolls": rolls, "hits": hits, "crits": crits}
+
+
+## Netto-Erfolge = max(0, Treffer des Angreifers - Erfolge der Verteidigung).
+static func net_successes(attack_hits: int, defense_hits: int) -> int:
+	return maxi(0, attack_hits - defense_hits)
+
+
+## Verrechnet Netto-Erfolge durch Schild -> Panzerung -> HP
+## (dice-system.md Abschnitt 6). Ein Netto-Erfolg = 1 Schadenspunkt.
+## AP/SD senken die jeweilige effektive Schicht vor der Verrechnung,
+## Lethal ist ein einmaliger Flat-Bonus, sobald mindestens 1 Punkt HP-
+## Schaden übrig bleibt. Kein Mindestschaden – ein Treffer kann komplett
+## abgefangen werden.
+## Rückgabe: {"shield": Schildschaden, "hp": HP-Schaden}
+static func resolve_net_damage(p_net_successes: int, p_ap: int, p_sd: int, p_lethal: int, shield: int, armor: int) -> Dictionary:
+	var eff_shield := maxi(shield - p_sd, 0)
+	var to_shield := mini(p_net_successes, eff_shield)
+	var after_shield := p_net_successes - to_shield
+	var eff_armor := maxi(armor - p_ap, 0)
+	var damage := maxi(after_shield - eff_armor, 0)
+	if damage >= 1:
+		damage += p_lethal
+	return {"shield": to_shield, "hp": damage}
