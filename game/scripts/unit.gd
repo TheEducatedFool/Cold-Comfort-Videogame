@@ -112,8 +112,8 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 		model_scene = PLAYER_MODELS[hash(p_name) % PLAYER_MODELS.size()]
 	var figure: Node3D = model_scene.instantiate()
 	add_child(figure)
-	_recenter_paperdoll(figure)
 	figure.scale = Vector3.ONE * 2.2
+	_recenter_paperdoll(figure)
 	_tint_all(figure, color)
 
 	_part_arm_left = _find_by_name(figure, "armLeft")
@@ -133,7 +133,7 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 		var weapon_inst: Node3D = weapon_scene.instantiate()
 		_part_arm_right.add_child(weapon_inst)
 		weapon_inst.position = Vector3(0.06, -0.32, -0.02)
-		weapon_inst.scale = Vector3.ONE * 1.3
+		weapon_inst.scale = Vector3.ONE * 0.7
 	play_idle()
 
 	# Rigger-Drohne: kleiner schwebender Würfel, der neben der Einheit wippt.
@@ -211,13 +211,17 @@ func _find_by_name(node: Node, part_name: String) -> Node3D:
 ## Verschiebt sie so, dass ihre Grundfläche mittig auf (0,0) im lokalen Raum
 ## steht. Nutzt reine Kindtransformationen statt global_transform, weil
 ## setup() läuft, bevor die Einheit selbst im Szenenbaum hängt.
+## WICHTIG: 'model' muss schon seine endgültige scale haben, BEVOR das hier
+## aufgerufen wird - der Ausgleichs-Versatz wird mit skaliert (model.position
+## liegt im UNSKALIERTEN Elternraum, die gemessene AABB aber im skalierten
+## Innenraum von 'model'), sonst passt die Korrektur nur bei scale = 1.
 func _recenter_paperdoll(model: Node3D) -> void:
 	var aabb := _local_aabb(model, Transform3D.IDENTITY)
 	if aabb.size == Vector3.ZERO:
 		return
 	var center_x := aabb.position.x + aabb.size.x / 2.0
 	var center_z := aabb.position.z + aabb.size.z / 2.0
-	model.position -= Vector3(center_x, 0.0, center_z)
+	model.position -= Vector3(center_x, 0.0, center_z) * model.scale.x
 
 
 func _local_aabb(node: Node, xform: Transform3D) -> AABB:

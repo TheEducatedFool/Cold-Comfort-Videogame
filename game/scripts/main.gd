@@ -22,7 +22,9 @@ extends Node3D
 ##   Klick auf Soldat oder Tab  -> Einheit wechseln
 ##   O                          -> Overwatch (beendet Aktivierung)
 ##   1 / 2                      -> Klassen-Fähigkeit (Esc bricht Zielwahl ab)
-##   Q / E                      -> Kamera drehen (90°-Schritte)
+##   Q / E (gedrückt halten)    -> Kamera stufenlos drehen
+##   Mausrad                    -> Kamera zoomen
+##   Rechte Maustaste ziehen    -> Kamera frei pannen
 ##   Enter oder Button          -> Zug beenden (dann zieht der Swarm)
 ##   R                          -> Neustart nach Sieg/Niederlage
 
@@ -35,6 +37,11 @@ const ACTIONS_PER_TURN := 2
 
 const CAM_RADIUS := 23.0
 const CAM_HEIGHT := 18.0
+const CAM_ROTATE_SPEED := 90.0   # Grad/Sekunde bei gehaltener Q/E-Taste
+const CAM_ZOOM_STEP := 2.0       # Groessenaenderung pro Mausrad-Tick
+const CAM_ZOOM_MIN := 8.0
+const CAM_ZOOM_MAX := 50.0
+const CAM_PAN_BUTTON := MOUSE_BUTTON_RIGHT
 
 # Kenney "Space Station Kit" Platzhalter-Modelle (CC0, siehe
 # game/assets/kenney_space_station/License.txt) - passt vom Look besser
@@ -170,7 +177,7 @@ const SHIP_HURT_LINES := [
 	"Ship: \"Autsch. Sagt man das so? Autsch.\"",
 ]
 
-const INFO_DEFAULT := "Klick: bewegen/schießen · Tab: Einheit · O: Overwatch · 1/2: Fähigkeit · Q/E: Kamera · L: Sichtlinien · Enter: Aktivierung beenden"
+const INFO_DEFAULT := "Klick: bewegen/Aktionsmenü · Tab: Einheit · O: Overwatch · 1/2: Fähigkeit · Q/E: drehen · Rad: zoomen · Rechtsklick+Ziehen: pannen · L: Sichtlinien · Enter: Aktivierung beenden"
 
 # --- Zustand ---------------------------------------------------------------
 
@@ -194,6 +201,7 @@ var camera: Camera3D
 var cam_yaw := 45.0
 var cam_tween: Tween
 var map_center := Vector3.ZERO
+var cam_panning := false
 
 var highlight_nodes: Dictionary = {}   # Vector2i -> MeshInstance3D
 var hover_marker: MeshInstance3D       # weiß: Bewegungs-Vorschau
@@ -375,16 +383,31 @@ func _set_map_center(pos: Vector3) -> void:
 	_apply_cam_yaw(cam_yaw)
 
 
-## Dreht die Kamera weich um 90° nach links (-1) oder rechts (+1).
-func _rotate_camera(dir: int) -> void:
+## Mausrad: Kamera stufenlos zoomen (orthogonale Kamera -> Sichtgröße
+## ändern, nicht die Distanz - siehe camera.size in _build_camera_and_light).
+func _zoom_camera(delta_size: float) -> void:
 	if camera == null:
 		return
-	var target := cam_yaw + 90.0 * float(dir)
+	camera.size = clampf(camera.size + delta_size, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
+
+
+## Rechte Maustaste ziehen: Kamera frei pannen. Verschiebt map_center
+## bildschirmparallel zur aktuellen Kamera-Ausrichtung - 'grab and drag',
+## das Tempo skaliert automatisch mit dem aktuellen Zoom (camera.size).
+func _pan_camera(screen_delta: Vector2) -> void:
+	if camera == null:
+		return
+	var viewport_h := float(get_viewport().get_visible_rect().size.y)
+	if viewport_h <= 0.0:
+		return
 	if cam_tween != null and cam_tween.is_valid():
-		cam_tween.kill()
-	cam_tween = create_tween()
-	cam_tween.tween_method(_apply_cam_yaw, cam_yaw, target, 0.35) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		cam_tween.kill()  # manuelles Pannen hat Vorrang vor dem Auto-Zentrieren
+	var units_per_pixel := camera.size / viewport_h
+	var basis := camera.global_transform.basis
+	var right := Vector3(basis.x.x, 0.0, basis.x.z).normalized()
+	var forward := Vector3(-basis.z.x, 0.0, -basis.z.z).normalized()
+	map_center += (-right * screen_delta.x + forward * screen_delta.y) * units_per_pixel
+	_apply_cam_yaw(cam_yaw)
 
 
 func _spawn_units() -> void:
@@ -653,9 +676,18 @@ func _cell_to_world(c: Vector2i) -> Vector3:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
+		if cam_panning:
+			_pan_camera(event.relative)
 		_update_hover(event.position)
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_handle_click(event.position)
+	elif event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_handle_click(event.position)
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_camera(-CAM_ZOOM_STEP)
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_camera(CAM_ZOOM_STEP)
+		elif event.button_index == CAM_PAN_BUTTON:
+			cam_panning = event.pressed
 	elif event is InputEventKey and event.pressed:
 		match event.keycode:
 			KEY_ENTER:
@@ -668,10 +700,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				_use_ability_slot(0)
 			KEY_2:
 				_use_ability_slot(1)
-			KEY_Q:
-				_rotate_camera(-1)
-			KEY_E:
-				_rotate_camera(1)
 			KEY_L:
 				los_debug = not los_debug
 				_refresh_los_debug()
@@ -682,6 +710,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if game_over:
 					get_tree().reload_current_scene()
+
+
+## Q/E gedrückt halten -> Kamera dreht sich stufenlos (statt der frueheren
+## 90°-Schritte).
+func _process(delta: float) -> void:
+	if camera == null:
+		return
+	var rotate_dir := 0.0
+	if Input.is_key_pressed(KEY_Q):
+		rotate_dir -= 1.0
+	if Input.is_key_pressed(KEY_E):
+		rotate_dir += 1.0
+	if rotate_dir != 0.0:
+		if cam_tween != null and cam_tween.is_valid():
+			cam_tween.kill()
+		_apply_cam_yaw(cam_yaw + rotate_dir * CAM_ROTATE_SPEED * delta)
 
 
 func _cell_under_mouse(screen_pos: Vector2) -> Variant:
