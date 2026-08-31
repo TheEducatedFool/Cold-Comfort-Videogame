@@ -36,11 +36,16 @@ const ACTIONS_PER_TURN := 2
 const CAM_RADIUS := 23.0
 const CAM_HEIGHT := 18.0
 
-# Kenney "Prototype Kit" Platzhalter-Modelle (CC0, siehe
-# game/assets/kenney_prototype/License.txt).
-const MODEL_FLOOR := preload("res://assets/kenney_prototype/floor-square.glb")
-const MODEL_WALL := preload("res://assets/kenney_prototype/wall.glb")
-const MODEL_CRATE := preload("res://assets/kenney_prototype/crate.glb")
+# Kenney "Space Station Kit" Platzhalter-Modelle (CC0, siehe
+# game/assets/kenney_space_station/License.txt) - passt vom Look besser
+# zur Sci-Fi-Station als das generische Prototype-Kit (von Kamil
+# freigegeben, 2026-08-31). Je zwei Varianten für volle/halbe Deckung für
+# etwas visuelle Abwechslung, siehe _build_floor().
+const MODEL_FLOOR := preload("res://assets/kenney_space_station/floor.glb")
+const MODEL_WALL := preload("res://assets/kenney_space_station/wall.glb")
+const MODEL_WALL_WINDOW := preload("res://assets/kenney_space_station/wall-window.glb")
+const MODEL_CRATE := preload("res://assets/kenney_space_station/container.glb")
+const MODEL_CRATE_WIDE := preload("res://assets/kenney_space_station/container-wide.glb")
 
 const MEND_RANGE := 8.0
 const MEND_HEAL := 2
@@ -211,8 +216,6 @@ var roll_log_lines: Array[String] = []
 const ROLL_LOG_MAX := 10
 
 # Gemeinsame Materialien
-var mat_floor_a: StandardMaterial3D
-var mat_floor_b: StandardMaterial3D
 var mat_highlight: StandardMaterial3D
 var mat_hover: StandardMaterial3D
 var mat_target: StandardMaterial3D
@@ -243,11 +246,6 @@ func _ready() -> void:
 # --- Aufbau ----------------------------------------------------------------
 
 func _make_materials() -> void:
-	mat_floor_a = StandardMaterial3D.new()
-	mat_floor_a.albedo_color = Color("232a38")
-	mat_floor_b = StandardMaterial3D.new()
-	mat_floor_b.albedo_color = Color("1b2130")
-
 	mat_highlight = _unshaded(Color(0.35, 0.85, 0.5, 0.3))
 	mat_hover = _unshaded(Color(1.0, 1.0, 1.0, 0.25))
 	mat_target = _unshaded(Color(0.95, 0.35, 0.3, 0.4))
@@ -265,16 +263,6 @@ func _unshaded(color: Color) -> StandardMaterial3D:
 	return mat
 
 
-## Setzt das Material aller MeshInstance3D-Kindknoten rekursiv - für
-## importierte Kenney-Modelle, die sonst alle dieselbe geteilte
-## Prototype-Textur zeigen (z. B. das Boden-Schachbrettmuster).
-func _tint_all(node: Node, mat: StandardMaterial3D) -> void:
-	if node is MeshInstance3D:
-		node.material_override = mat
-	for c in node.get_children():
-		_tint_all(c, mat)
-
-
 func _build_grid_logic() -> void:
 	grid = GridLogic.new(GRID_W, GRID_H)
 	for c in OBSTACLES:
@@ -288,15 +276,21 @@ func _build_floor() -> void:
 			if OBSTACLES.has(c):
 				var h: float = OBSTACLES[c]
 				var inst: Node3D
+				var variant := (x + y) % 2 == 0
 				# Kenney-Modelle sind an der Basis pivotiert (Y=0 = Boden),
 				# ihre AABB in der Ursprungsgröße bestimmt den Skalierungsfaktor
-				# auf die Zielmaße (Feldbreite x Höhe x Feldtiefe).
+				# auf die Zielmaße (Feldbreite x Höhe x Feldtiefe). wall.glb/
+				# wall-window.glb: (1.0, 1.0, 0.3). container.glb: (0.575, 0.6,
+				# 0.575). container-wide.glb: (0.6, 0.7, 0.6).
 				if h >= Combat.FULL_COVER_HEIGHT:
-					inst = MODEL_WALL.instantiate()
-					inst.scale = Vector3((TILE * 0.96) / 0.2, h, TILE * 0.96)
-				else:
+					inst = MODEL_WALL.instantiate() if variant else MODEL_WALL_WINDOW.instantiate()
+					inst.scale = Vector3(TILE * 0.96, h, (TILE * 0.96) / 0.3)
+				elif variant:
 					inst = MODEL_CRATE.instantiate()
-					inst.scale = Vector3((TILE * 0.8) / 0.5, h / 0.5, TILE * 0.8)
+					inst.scale = Vector3((TILE * 0.8) / 0.575, h / 0.6, (TILE * 0.8) / 0.575)
+				else:
+					inst = MODEL_CRATE_WIDE.instantiate()
+					inst.scale = Vector3((TILE * 0.8) / 0.6, h / 0.7, (TILE * 0.8) / 0.6)
 				inst.position = Vector3(x * TILE, 0.0, y * TILE)
 				add_child(inst)
 			else:
@@ -304,7 +298,6 @@ func _build_floor() -> void:
 				tile.scale = Vector3(TILE * 0.98, 1.0, TILE * 0.98)
 				tile.position = Vector3(x * TILE, 0.0, y * TILE)
 				add_child(tile)
-				_tint_all(tile, mat_floor_a if (x + y) % 2 == 0 else mat_floor_b)
 
 	hover_marker = _make_quad(mat_hover, 0.03)
 	hover_marker.visible = false
@@ -415,12 +408,12 @@ func _spawn_units() -> void:
 
 func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, start: Vector2i) -> void:
 	var u := Unit.new()
+	add_child(u)  # zuerst in den Szenenbaum haengen, dann Kindfiguren aufbauen
 	u.setup(p_name, p_faction, color, stats)
 	u.cell = start
 	u.position = _cell_to_world(start)
 	u.actions = ACTIONS_PER_TURN if p_faction == Unit.Faction.PLAYER else 0
 	u.move_finished.connect(_on_any_move_finished)
-	add_child(u)
 	units.append(u)
 
 

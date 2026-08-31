@@ -8,10 +8,17 @@ extends Node3D
 
 signal move_finished
 
-## Kenney "Prototype Kit" Platzhalter-Figur für Soldaten (CC0, siehe
-## game/assets/kenney_prototype/License.txt). Kein passendes Kreatur-
-## Modell im Kit für den Swarm - der bleibt eine einfache Kugel.
-const FIGURE_MODEL := preload("res://assets/kenney_prototype/figurine.glb")
+## Kenney "Space Kit" Platzhalter-Figuren (CC0, siehe
+## game/assets/kenney_space_kit/License.txt): Astronauten für Soldaten
+## (zwei Varianten für etwas visuelle Abwechslung), Alien für den Swarm.
+## Beide Modelle bestehen aus einzelnen starren Körperteilen ohne Skelett-
+## Rig - Animationen laufen deshalb als Rotations-Tweens auf diesen Teilen
+## (siehe _find_by_name()/play_*() unten), nicht über einen AnimationPlayer.
+const PLAYER_MODELS := [
+	preload("res://assets/kenney_space_kit/astronautA.glb"),
+	preload("res://assets/kenney_space_kit/astronautB.glb"),
+]
+const ALIEN_MODEL := preload("res://assets/kenney_space_kit/alien.glb")
 
 enum Faction { PLAYER, SWARM }
 
@@ -69,7 +76,14 @@ var charges_used: int = 0        # Deckel: max. 2 pro Aktivierung
 
 var hp_label: Label3D
 var shield_bubble: MeshInstance3D
-var anim_player: AnimationPlayer
+
+# --- Paper-Doll-Animation (Körperteile ohne Skelett-Rig) --------------------
+var _part_arm_left: Node3D
+var _part_arm_right: Node3D
+var _part_leg_left: Node3D
+var _part_leg_right: Node3D
+var _rest_rotation: Dictionary = {}   # Node3D -> Vector3 (Ruhepose zum Zurücksetzen)
+var _walk_tween: Tween
 
 
 func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> void:
@@ -89,28 +103,38 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 	sentry = stats.get("sentry", false)
 	abilities = stats.get("abilities", [])
 
-	# Platzhalter-Körper: Kenney-Figur für Soldaten, gedrungene Kugel für
-	# den Swarm (kein passendes Kreatur-Modell im Prototype Kit).
+	# Platzhalter-Körper: Astronaut für Soldaten (zwei Varianten,
+	# klassengebunden ausgewählt), Alien für den Swarm.
+	var model_scene: PackedScene
 	if faction == Faction.SWARM:
-		var body := MeshInstance3D.new()
-		var blob := SphereMesh.new()
-		blob.radius = 0.55
-		blob.height = 0.9
-		body.mesh = blob
-		body.position.y = 0.45
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = color
-		body.material_override = mat
-		add_child(body)
+		model_scene = ALIEN_MODEL
 	else:
-		var figure := FIGURE_MODEL.instantiate()
-		figure.scale = Vector3.ONE * 2.2
-		add_child(figure)
-		_tint_all(figure, color)
-		anim_player = _find_animation_player(figure)
-		if anim_player != null:
-			anim_player.animation_finished.connect(_on_anim_finished)
-			anim_player.play("idle")
+		model_scene = PLAYER_MODELS[hash(p_name) % PLAYER_MODELS.size()]
+	var figure: Node3D = model_scene.instantiate()
+	add_child(figure)
+	_recenter_paperdoll(figure)
+	figure.scale = Vector3.ONE * 2.2
+	_tint_all(figure, color)
+
+	_part_arm_left = _find_by_name(figure, "armLeft")
+	_part_arm_right = _find_by_name(figure, "armRight")
+	_part_leg_left = _find_by_name(figure, "legLeft")
+	_part_leg_right = _find_by_name(figure, "legRight")
+	for part in [_part_arm_left, _part_arm_right, _part_leg_left, _part_leg_right]:
+		if part != null:
+			_rest_rotation[part] = part.rotation
+
+	# Fernkampfwaffe sichtbar in die rechte Hand geben, falls die Waffe ein
+	# Modell hat (Nahkampfwaffen/Swarm-Waffen haben aktuell keins, siehe
+	# weapons.gd) - Position ist grob geschätzt (kein visueller Check
+	# möglich), ggf. nach Rückmeldung nachjustieren.
+	if ranged_weapon != null and ranged_weapon.model_path != "" and _part_arm_right != null:
+		var weapon_scene: PackedScene = load(ranged_weapon.model_path)
+		var weapon_inst: Node3D = weapon_scene.instantiate()
+		_part_arm_right.add_child(weapon_inst)
+		weapon_inst.position = Vector3(0.06, -0.32, -0.02)
+		weapon_inst.scale = Vector3.ONE * 1.3
+	play_idle()
 
 	# Rigger-Drohne: kleiner schwebender Würfel, der neben der Einheit wippt.
 	if abilities.has("mend") or abilities.has("shock"):
@@ -169,49 +193,109 @@ func _tint_all(node: Node, color: Color) -> void:
 		_tint_all(c, color)
 
 
-## Sucht den AnimationPlayer im importierten Kenney-Modell (die Figur hat
-## fertige Animationen: idle, walk, sprint, attack-melee-*, holding-*-shoot,
-## die, ... - siehe game/assets/kenney_prototype/).
-func _find_animation_player(node: Node) -> AnimationPlayer:
-	if node is AnimationPlayer:
+## Sucht einen Kindknoten mit dem gegebenen Namen (Körperteile der Kenney-
+## Figuren heißen einheitlich armLeft/armRight/legLeft/legRight/body/head).
+func _find_by_name(node: Node, part_name: String) -> Node3D:
+	if node.name == part_name:
 		return node
 	for c in node.get_children():
-		var found := _find_animation_player(c)
+		var found := _find_by_name(c, part_name)
 		if found != null:
 			return found
 	return null
 
 
-## Die "walk"-Animation ist nicht als Loop importiert - solange die Einheit
-## noch läuft, einfach neu starten, statt in der letzten Pose einzufrieren.
-func _on_anim_finished(anim_name: StringName) -> void:
-	if anim_name == "walk" and is_moving:
-		anim_player.play("walk")
+## Diese Kenney-Modelle sind nicht am eigenen Ursprung zentriert (Erbe aus
+## der Sammel-Szene, in der die einzelnen Objekte ursprünglich nebeneinander
+## lagen) - ohne Korrektur stünde die Figur seitlich neben der Rasterzelle.
+## Verschiebt sie so, dass ihre Grundfläche mittig auf (0,0) im lokalen Raum
+## steht. Nutzt reine Kindtransformationen statt global_transform, weil
+## setup() läuft, bevor die Einheit selbst im Szenenbaum hängt.
+func _recenter_paperdoll(model: Node3D) -> void:
+	var aabb := _local_aabb(model, Transform3D.IDENTITY)
+	if aabb.size == Vector3.ZERO:
+		return
+	var center_x := aabb.position.x + aabb.size.x / 2.0
+	var center_z := aabb.position.z + aabb.size.z / 2.0
+	model.position -= Vector3(center_x, 0.0, center_z)
+
+
+func _local_aabb(node: Node, xform: Transform3D) -> AABB:
+	var result := AABB()
+	var got_any := false
+	if node is MeshInstance3D:
+		result = xform * node.get_aabb()
+		got_any = true
+	for c in node.get_children():
+		if c is Node3D:
+			var child_aabb := _local_aabb(c, xform * c.transform)
+			if got_any:
+				result = result.merge(child_aabb)
+			else:
+				result = child_aabb
+				got_any = true
+	return result
+
+
+func _stop_walk_tween() -> void:
+	if _walk_tween != null and _walk_tween.is_valid():
+		_walk_tween.kill()
+
+
+## Setzt Arme/Beine sanft zurück in ihre Ruhepose (z. B. nach Angriff/Lauf).
+func _reset_to_rest() -> void:
+	for part in _rest_rotation:
+		var rest: Vector3 = _rest_rotation[part]
+		var t := create_tween()
+		t.tween_property(part, "rotation", rest, 0.15)
 
 
 func play_idle() -> void:
-	if anim_player != null:
-		anim_player.play("idle")
+	_stop_walk_tween()
+	_reset_to_rest()
 
 
+## Kein Skelett-Rig vorhanden - der "Laufzyklus" ist ein simples
+## gegenläufiges Bein-Pendeln in Dauerschleife, solange die Einheit läuft.
 func play_walk() -> void:
-	if anim_player != null:
-		anim_player.play("walk")
+	_stop_walk_tween()
+	if _part_leg_left == null or _part_leg_right == null:
+		return
+	var amp := 0.5
+	_walk_tween = create_tween()
+	_walk_tween.set_loops()
+	_walk_tween.tween_property(_part_leg_left, "rotation:x", amp, 0.18)
+	_walk_tween.parallel().tween_property(_part_leg_right, "rotation:x", -amp, 0.18)
+	_walk_tween.tween_property(_part_leg_left, "rotation:x", -amp, 0.18)
+	_walk_tween.parallel().tween_property(_part_leg_right, "rotation:x", amp, 0.18)
 
 
+## Fernkampf: kurzer Rückstoß im rechten (Waffen-)Arm.
 func play_attack_ranged() -> void:
-	if anim_player != null:
-		anim_player.play("holding-both-shoot")
+	_recoil(_part_arm_right, 0.4)
 
 
+## Nahkampf: der rechte Arm schlägt einmal nach vorne aus.
 func play_attack_melee() -> void:
-	if anim_player != null:
-		anim_player.play("attack-melee-right")
+	_recoil(_part_arm_right, 1.4)
 
 
+func _recoil(part: Node3D, angle: float) -> void:
+	if part == null:
+		return
+	var rest: Vector3 = _rest_rotation.get(part, part.rotation)
+	var t := create_tween()
+	t.tween_property(part, "rotation:x", rest.x - angle, 0.08)
+	t.tween_property(part, "rotation:x", rest.x, 0.18)
+
+
+## Kippt die ganze Einheit zur Seite - main.gd lässt sie danach zusätzlich
+## zusammenschrumpfen und entfernt sie (siehe _kill_unit()).
 func play_die() -> void:
-	if anim_player != null:
-		anim_player.play("die")
+	_stop_walk_tween()
+	var t := create_tween()
+	t.tween_property(self, "rotation:z", deg_to_rad(85.0), 0.35) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func is_alive() -> bool:

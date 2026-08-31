@@ -20,3 +20,7 @@ extends Resource
 ## Trait-IDs (0-2 pro Waffe, siehe traits.md Abschnitt 1) - volle
 ## Trait-Wirkungen kommen erst in M6, hier zunächst nur Platzhalter.
 @export var trait_ids: Array[String] = []
+
+## Optionales 3D-Modell für die Darstellung in der Hand der Figur (leer =
+## keine sichtbare Waffe, z. B. bei Nahkampfwaffen ohne passendes Modell).
+@export var model_path: String = ""

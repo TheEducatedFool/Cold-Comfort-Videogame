@@ -32,11 +32,14 @@ static func make(id: String) -> Weapon:
 	return standard_rifle()
 
 
+const BLASTER_KIT := "res://assets/kenney_blaster_kit/"
+
 ## traits.md 0.2: Reichweite 8, kein AP/SD/Lethal.
 static func standard_rifle() -> Weapon:
 	var w := Weapon.new()
 	w.weapon_name = "Standard-Sturmgewehr"
 	w.weapon_range = 8
+	w.model_path = BLASTER_KIT + "blaster-j.glb"
 	return w
 
 
@@ -47,6 +50,7 @@ static func sniper_rifle() -> Weapon:
 	w.weapon_range = 12
 	w.ap = 1
 	w.lethal = 2
+	w.model_path = BLASTER_KIT + "blaster-d.glb"
 	return w
 
 
@@ -58,6 +62,7 @@ static func heavy_machine_gun() -> Weapon:
 	w.weapon_name = "Schweres MG"
 	w.weapon_range = 9
 	w.ap = 1
+	w.model_path = BLASTER_KIT + "blaster-e.glb"
 	return w
 
 
@@ -69,6 +74,7 @@ static func combat_shotgun() -> Weapon:
 	w.weapon_name = "Kampfschrotflinte"
 	w.weapon_range = 4
 	w.lethal = 1
+	w.model_path = BLASTER_KIT + "blaster-i.glb"
 	return w
 
 
@@ -90,6 +96,7 @@ static func pistol() -> Weapon:
 	var w := Weapon.new()
 	w.weapon_name = "Pistole"
 	w.weapon_range = 6
+	w.model_path = BLASTER_KIT + "blaster-b.glb"
 	return w
 
 
