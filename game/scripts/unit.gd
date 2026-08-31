@@ -59,8 +59,13 @@ var free_shot: bool = false      # nächster Schuss kostet keine Aktion
 var abilities: Array = []        # Fähigkeits-IDs, z. B. ["mend", "shock"]
 var cooldowns: Dictionary = {}   # Fähigkeits-ID -> verbleibende Runden
 
+# --- Nahkampf-Sonderboni (dice-system.md Abschnitt 3, M4) -------------------
+var charge_ready: bool = false   # naechster Nahkampfangriff bekommt +2 Wuerfel
+var charges_used: int = 0        # Deckel: max. 2 pro Aktivierung
+
 var hp_label: Label3D
 var shield_bubble: MeshInstance3D
+var anim_player: AnimationPlayer
 
 
 func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> void:
@@ -97,6 +102,10 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 		figure.scale = Vector3.ONE * 2.2
 		add_child(figure)
 		_tint_all(figure, color)
+		anim_player = _find_animation_player(figure)
+		if anim_player != null:
+			anim_player.animation_finished.connect(_on_anim_finished)
+			anim_player.play("idle")
 
 	# Rigger-Drohne: kleiner schwebender Würfel, der neben der Einheit wippt.
 	if abilities.has("mend") or abilities.has("shock"):
@@ -153,6 +162,51 @@ func _tint_all(node: Node, color: Color) -> void:
 		node.material_override = mat
 	for c in node.get_children():
 		_tint_all(c, color)
+
+
+## Sucht den AnimationPlayer im importierten Kenney-Modell (die Figur hat
+## fertige Animationen: idle, walk, sprint, attack-melee-*, holding-*-shoot,
+## die, ... - siehe game/assets/kenney_prototype/).
+func _find_animation_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for c in node.get_children():
+		var found := _find_animation_player(c)
+		if found != null:
+			return found
+	return null
+
+
+## Die "walk"-Animation ist nicht als Loop importiert - solange die Einheit
+## noch läuft, einfach neu starten, statt in der letzten Pose einzufrieren.
+func _on_anim_finished(anim_name: StringName) -> void:
+	if anim_name == "walk" and is_moving:
+		anim_player.play("walk")
+
+
+func play_idle() -> void:
+	if anim_player != null:
+		anim_player.play("idle")
+
+
+func play_walk() -> void:
+	if anim_player != null:
+		anim_player.play("walk")
+
+
+func play_attack_ranged() -> void:
+	if anim_player != null:
+		anim_player.play("holding-both-shoot")
+
+
+func play_attack_melee() -> void:
+	if anim_player != null:
+		anim_player.play("attack-melee-right")
+
+
+func play_die() -> void:
+	if anim_player != null:
+		anim_player.play("die")
 
 
 func is_alive() -> bool:
@@ -238,6 +292,7 @@ func walk_path(path: Array[Vector2i], tile_size: float) -> void:
 		return
 	is_moving = true
 	cell = path[path.size() - 1]  # Logisch steht die Einheit sofort am Ziel
+	play_walk()
 
 	var tween := create_tween()
 	for i in range(1, path.size()):
@@ -249,4 +304,5 @@ func walk_path(path: Array[Vector2i], tile_size: float) -> void:
 
 func _on_walk_done() -> void:
 	is_moving = false
+	play_idle()
 	move_finished.emit()

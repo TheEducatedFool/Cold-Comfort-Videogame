@@ -90,6 +90,23 @@ static func cover_bonus_dice(malus: int) -> int:
 
 
 ## ---------------------------------------------------------------------
+## Zone of Control (dice-system.md Abschnitt 3, M4) - rein geometrisch,
+## jede Runde neu aus der Position abgelesen (kein gespeicherter Zustand).
+## ---------------------------------------------------------------------
+
+## Liegt 'cell' in der Zone of Control von 'controller_cell' (direkt
+## angrenzend, Manhattan-Distanz 1)?
+static func in_zoc(cell: Vector2i, controller_cell: Vector2i) -> bool:
+	return absi(cell.x - controller_cell.x) + absi(cell.y - controller_cell.y) == 1
+
+
+## Verlässt ein Schritt von 'from' nach 'to' die Zone of Control von
+## 'controller_cell' (vorher angrenzend, danach nicht mehr)?
+static func leaves_zoc(from: Vector2i, to: Vector2i, controller_cell: Vector2i) -> bool:
+	return in_zoc(from, controller_cell) and not in_zoc(to, controller_cell)
+
+
+## ---------------------------------------------------------------------
 ## Würfelpool-System (docs/dice-system.md) – hat das alte Prozent-System
 ## (hit_chance/roll_damage/resolve_damage) ab M3 vollständig abgelöst.
 ##

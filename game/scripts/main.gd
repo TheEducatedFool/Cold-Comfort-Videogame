@@ -104,14 +104,15 @@ const STATS_REIVER := {
 
 # Swarm-Werte: noch nicht in den Docs vorgegeben - TODO Balancing, grob an
 # Handler-Niveau bzw. niedriger orientiert (prototype-plan.md M2).
+# Nach Kamils erstem Playtest (2026-08-31) einen Schritt staerker gemacht.
 const STATS_DRONE := {
-	"hp": 3, "shield": 0, "armor": 1,
-	"ranged": 3, "melee": 4, "defense": 3,
+	"hp": 4, "shield": 0, "armor": 1,
+	"ranged": 3, "melee": 5, "defense": 4,
 	"move": 6, "weapon": "drone_claws",
 }
 const STATS_SPITTER := {
-	"hp": 2, "shield": 0, "armor": 0,
-	"ranged": 4, "melee": 3, "defense": 3,
+	"hp": 3, "shield": 0, "armor": 0,
+	"ranged": 5, "melee": 3, "defense": 4,
 	"move": 6, "weapon": "spitter_acid",
 }
 
@@ -174,6 +175,11 @@ var round_banner_label: Label
 var end_turn_button: Button
 var overwatch_button: Button
 var ability_buttons: Array[Button] = []
+var ui_layer: CanvasLayer
+var stat_panel: RichTextLabel
+var log_panel: RichTextLabel
+var roll_log_lines: Array[String] = []
+const ROLL_LOG_MAX := 10
 
 # Gemeinsame Materialien
 var mat_floor_a: StandardMaterial3D
@@ -371,6 +377,7 @@ func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, 
 func _build_ui() -> void:
 	var ui := CanvasLayer.new()
 	add_child(ui)
+	ui_layer = ui
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -459,6 +466,42 @@ func _build_ui() -> void:
 	round_banner_label.modulate = Color(1, 1, 1, 0)
 	round_banner_label.visible = false
 	ui.add_child(round_banner_label)
+
+	# Statustabelle: Werte der gerade gehoverten/ausgewählten Einheit.
+	var stat_box := PanelContainer.new()
+	stat_box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	stat_box.offset_left = -300
+	stat_box.offset_top = 16
+	stat_box.offset_right = -16
+	stat_box.offset_bottom = 260
+	stat_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(stat_box)
+
+	stat_panel = RichTextLabel.new()
+	stat_panel.bbcode_enabled = true
+	stat_panel.scroll_active = false
+	stat_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stat_panel.add_theme_font_size_override("normal_font_size", 14)
+	stat_panel.add_theme_font_size_override("bold_font_size", 16)
+	stat_box.add_child(stat_panel)
+
+	# Würfel-Log: Aufschlüsselung der letzten Angriffswürfe.
+	var log_box := PanelContainer.new()
+	log_box.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	log_box.offset_left = -460
+	log_box.offset_top = -240
+	log_box.offset_right = -16
+	log_box.offset_bottom = -16
+	log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(log_box)
+
+	log_panel = RichTextLabel.new()
+	log_panel.bbcode_enabled = true
+	log_panel.scroll_active = true
+	log_panel.scroll_following = true
+	log_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	log_panel.add_theme_font_size_override("normal_font_size", 12)
+	log_box.add_child(log_panel)
 
 	_update_labels()
 
@@ -615,10 +658,9 @@ func _handle_click(screen_pos: Vector2) -> void:
 		_select(u)
 		return
 
-	# 2) Gegner angeklickt -> angreifen, falls möglich
-	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
-		if _can_attack(selected, u) and _commit(selected):
-			_player_attack(selected, u)
+	# 2) Gegner angeklickt -> Aktionsmenü (Schießen/Nahkampf/passende Skills)
+	if u != null and u.faction == Unit.Faction.SWARM and selected != null:
+		_open_action_menu(selected, u, screen_pos)
 		return
 
 	# 3) Erreichbares Feld angeklickt -> bewegen
@@ -646,9 +688,42 @@ func _try_move_selected(c: Vector2i) -> bool:
 		selected.set_bulwark(false)  # Bewegung beendet Bulwark Stance
 	_clear_highlights()
 	hover_marker.visible = false
-	selected.walk_path(path, TILE)
+	_track_charge(selected, path[0], path[path.size() - 1])
+	_walk_with_reactions(selected, path)
 	_update_labels()
 	return true
+
+
+## Klick auf einen Gegner: statt automatisch zu feuern, ein Menü mit den
+## tatsächlich möglichen Aktionen gegen dieses Ziel - Schießen/Nahkampf
+## (je nachdem, was die ausgerüstete Waffe hergibt und ob Reichweite/
+## Sichtlinie bzw. Angrenzung passen), dazu passende aktive Skills wie
+## Shock. Ist nichts davon möglich, öffnet sich kein Menü.
+func _open_action_menu(attacker: Unit, target: Unit, screen_pos: Vector2) -> void:
+	var menu := PopupMenu.new()
+	ui_layer.add_child(menu)
+	var actions: Array[Callable] = []
+
+	if _can_shoot(attacker) and _can_attack(attacker, target):
+		var label := "Nahkampf" if attacker.weapon.is_melee else "Schießen"
+		menu.add_item(label)
+		actions.append(func() -> void: _player_attack(attacker, target))
+
+	for aid in attacker.abilities:
+		if aid == "shock" and attacker.actions > 0 and attacker.cooldown_of("shock") == 0 \
+				and _dist(attacker.cell, target.cell) <= SHOCK_RANGE:
+			menu.add_item("Shock (%s)" % ABILITIES["shock"]["label"])
+			actions.append(func() -> void: _cast_shock(attacker, target))
+
+	if actions.is_empty():
+		menu.queue_free()
+		info_label.text = "Keine Aktion gegen %s möglich." % target.unit_name
+		return
+
+	menu.id_pressed.connect(func(id: int) -> void: actions[id].call())
+	menu.popup_hide.connect(menu.queue_free)
+	menu.position = Vector2i(screen_pos)
+	menu.popup()
 
 
 func _update_hover(screen_pos: Vector2) -> void:
@@ -678,9 +753,11 @@ func _update_hover(screen_pos: Vector2) -> void:
 
 	info_label.text = INFO_DEFAULT
 	if cv == null:
+		_show_unit_stats(selected)
 		return
 	var c: Vector2i = cv
 	var u := _unit_at(c)
+	_show_unit_stats(u if u != null else selected)
 
 	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
 		target_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
@@ -707,7 +784,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 				def_txt += " · Ziel-Schild %d" % u.shield
 			if u.armor > 0:
 				def_txt += " · Ziel-Panzerung %d" % u.armor
-			info_label.text = "Ziel: %s – %d Würfel%s · %s%s" \
+			info_label.text = "Ziel: %s – %d Würfel%s · %s%s · Klick für Aktionsmenü" \
 				% [u.unit_name, pool, cover_txt, dmg_txt, def_txt]
 	elif highlight_nodes.has(c):
 		hover_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
@@ -776,6 +853,35 @@ func _use_ability_slot(slot: int) -> void:
 	_update_labels()
 
 
+## Shock: 1 Schaden auf den Schild - oder, falls keiner da ist, 1 direkt
+## auf die HP (ignoriert Panzerung), plus der Shocked-Status. Aufrufbar
+## sowohl über die alte Tasten-1/2-Zielwahl als auch direkt über das
+## Aktionsmenü beim Klick auf einen Gegner.
+func _cast_shock(caster: Unit, target: Unit) -> void:
+	if not _commit(caster):
+		return
+	caster.actions -= 1
+	caster.cooldowns["shock"] = ABILITIES["shock"]["cooldown"]
+	info_label.text = INFO_DEFAULT
+	await _drone_flight(caster, target)
+	var res := {"shield": 0, "hp": 0}
+	if target.shield > 0:
+		res["shield"] = 1
+	else:
+		res["hp"] = 1
+	target.take_hit(res["shield"], res["hp"])
+	_flinch(target)
+	_show_hit_popup(target, res)
+	if not target.is_alive():
+		_kill_unit(target)
+	else:
+		target.set_shocked(true)
+	ship_label.text = "Ship: \"Zzzt. Elektroschock zugestellt. Ich applaudiere innerlich.\""
+	_update_labels()
+	_refresh_highlights()
+	_after_player_action()
+
+
 func _resolve_pending_ability(target: Unit) -> void:
 	var caster := selected
 	var ability_id := pending_ability
@@ -802,32 +908,8 @@ func _resolve_pending_ability(target: Unit) -> void:
 	if ability_id == "shock" and target != null and caster != null \
 			and target.faction == Unit.Faction.SWARM \
 			and _dist(caster.cell, target.cell) <= SHOCK_RANGE:
-		if not _commit(caster):
-			pending_ability = ""
-			return
 		pending_ability = ""
-		caster.actions -= 1
-		caster.cooldowns["shock"] = ABILITIES["shock"]["cooldown"]
-		info_label.text = INFO_DEFAULT
-		await _drone_flight(caster, target)
-		# Elektroschock: 1 Schaden auf den Schild – oder, wenn keiner da ist,
-		# 1 direkt auf die HP (ignoriert Panzerung).
-		var res := {"shield": 0, "hp": 0}
-		if target.shield > 0:
-			res["shield"] = 1
-		else:
-			res["hp"] = 1
-		target.take_hit(res["shield"], res["hp"])
-		_flinch(target)
-		_show_hit_popup(target, res)
-		if not target.is_alive():
-			_kill_unit(target)
-		else:
-			target.set_shocked(true)
-		ship_label.text = "Ship: \"Zzzt. Elektroschock zugestellt. Ich applaudiere innerlich.\""
-		_update_labels()
-		_refresh_highlights()
-		_after_player_action()
+		await _cast_shock(caster, target)
 		return
 
 	# Ungültiges Ziel -> Zielwahl abbrechen
@@ -874,6 +956,7 @@ func _select(u: Unit) -> void:
 	select_ring.visible = true
 	_refresh_highlights()
 	_refresh_los_debug()
+	_show_unit_stats(u)
 	_update_labels()
 
 
@@ -888,6 +971,48 @@ func _select_next() -> void:
 		return
 	var idx := open.find(selected)
 	_select(open[(idx + 1) % open.size()])
+
+
+## Zeigt die Werte von 'u' als saubere Tabelle im Statuspanel (oben rechts) -
+## fuer die gehoverte Einheit (egal ob eigen oder Gegner) oder, wenn gerade
+## keine gehovert wird, fuer die aktuell ausgewaehlte.
+func _show_unit_stats(u: Unit) -> void:
+	if stat_panel == null:
+		return
+	if u == null or not is_instance_valid(u):
+		stat_panel.text = ""
+		return
+	var w := u.weapon
+	var rows: Array = [
+		["Fraktion", "Spieler" if u.faction == Unit.Faction.PLAYER else "Swarm"],
+		["HP", "%d/%d" % [u.hp, u.max_hp]],
+	]
+	if u.max_shield > 0:
+		rows.append(["Schild", "%d/%d" % [u.shield, u.max_shield]])
+	rows.append(["Panzerung", str(u.armor)])
+	rows.append(["Fernkampf", str(u.ranged)])
+	rows.append(["Nahkampf", str(u.melee)])
+	rows.append(["Verteidigung", str(u.defense)])
+	rows.append(["Waffe", w.weapon_name])
+	rows.append(["  Reichweite", "Nahkampf (angrenzend)" if w.is_melee else str(w.weapon_range)])
+	rows.append(["  AP / SD / Tödlich", "%d / %d / %d" % [w.ap, w.sd, w.lethal]])
+	var status: Array[String] = []
+	if u.overwatch:
+		status.append("Overwatch")
+	if u.bulwark:
+		status.append("Bulwark")
+	if u.shocked:
+		status.append("Geschockt")
+	if u.activated:
+		status.append("Aktiviert")
+	if not status.is_empty():
+		rows.append(["Status", ", ".join(status)])
+
+	var bb := "[b]%s[/b]\n[table=2]" % u.unit_name
+	for row in rows:
+		bb += "[cell]%s[/cell][cell]%s[/cell]" % [row[0], row[1]]
+	bb += "[/table]"
+	stat_panel.text = bb
 
 
 func _update_labels() -> void:
@@ -1021,6 +1146,14 @@ func _fire_tracer(shooter: Unit, target: Unit, hit: bool, color: Color) -> void:
 	tracer.queue_free()
 
 
+## Spielt die passende Angriffsanimation der Figur (Fernkampf/Nahkampf).
+func _play_attack_anim(attacker: Unit) -> void:
+	if attacker.weapon.is_melee:
+		attacker.play_attack_melee()
+	else:
+		attacker.play_attack_ranged()
+
+
 ## Kurzes Zucken beim Einschlag.
 func _flinch(u: Unit) -> void:
 	if u.is_moving:
@@ -1064,19 +1197,55 @@ func _drone_flight(from_u: Unit, to_u: Unit) -> void:
 ## hat die Verteidigung durchbrochen (auch wenn am Ende 0 HP-Schaden
 ## durchkommt, weil Panzerung/Schild alles auffangen).
 ## Nahkampf-Boni (Charge/ZoC/Flanking) fehlen noch - kommen erst in M4.
-func _roll_attack(attacker: Unit, target: Unit) -> Dictionary:
+## 'extra_bonus': situative Zusatzwürfel, die nicht aus Deckung/Charge/
+## Flanking stammen (z. B. der +1-Deckel beim ZoC-Gegenangriff aus
+## mehreren gleichzeitig verlassenen Zonen, siehe _resolve_zoc_exit).
+## 'force_melee': fuer den ZoC-Gegenangriff (_resolve_zoc_exit) - jeder
+## Kaempfer kontrolliert seine Zone of Control unabhaengig von seiner
+## Waffe (dice-system.md Abschnitt 3: "Jeder Kämpfer..."), auch ein reiner
+## Fernkaempfer wie Deadeye greift dabei mit seinem Nahkampf-Stat an.
+func _roll_attack(attacker: Unit, target: Unit, extra_bonus: int = 0, force_melee: bool = false) -> Dictionary:
 	var w := attacker.weapon
-	var bonus := 0
-	if not w.is_melee:
+	var is_melee := force_melee or w.is_melee
+	var bonus := extra_bonus
+	var bonus_txt := ""
+	if is_melee:
+		if attacker.charge_ready:
+			bonus += 2
+			attacker.charge_ready = false
+			bonus_txt += " · Charge"
+		if _flanking(attacker, target):
+			bonus += 1
+			bonus_txt += " · Flanking"
+	else:
 		var cm := Combat.cover_malus(grid, attacker.cell, target.cell, _extra_cover_for(target))
-		bonus = Combat.cover_bonus_dice(cm)
-	var skill := attacker.melee if w.is_melee else attacker.ranged
+		bonus += Combat.cover_bonus_dice(cm)
+	var skill := attacker.melee if is_melee else attacker.ranged
 	var atk := Combat.roll_pool(3 + bonus, skill)
 	var def := Combat.roll_pool(3, target.defense)
 	var net := Combat.net_successes(atk["hits"], def["hits"])
 	var res := Combat.resolve_net_damage(net, w.ap, w.sd, w.lethal, target.shield, target.armor)
 	res["net"] = net
+	_log_roll(attacker, target, atk, def, net, res, bonus_txt)
 	return res
+
+
+## Hängt eine Zeile mit der vollen Würfel-Aufschlüsselung ans Log an
+## (letzte ROLL_LOG_MAX Angriffe, neueste unten).
+func _log_roll(attacker: Unit, target: Unit, atk: Dictionary, def: Dictionary, net: int, res: Dictionary, bonus_txt: String) -> void:
+	if log_panel == null:
+		return
+	var line := "[b]%s[/b] -> %s%s\n  Angriff %s = %d Treffer (%d Krit) · Verteidigung %s = %d Erfolge\n  Netto %d" \
+		% [attacker.unit_name, target.unit_name, bonus_txt, \
+			str(atk["rolls"]), atk["hits"], atk["crits"], str(def["rolls"]), def["hits"], net]
+	if net > 0:
+		line += " · Schild -%d · HP -%d" % [res["shield"], res["hp"]]
+	else:
+		line += " · kein Durchbruch"
+	roll_log_lines.append(line)
+	while roll_log_lines.size() > ROLL_LOG_MAX:
+		roll_log_lines.pop_front()
+	log_panel.text = "\n".join(roll_log_lines)
 
 
 ## Wendet ein bereits gewürfeltes Ergebnis (aus _roll_attack) an: Schaden,
@@ -1114,6 +1283,7 @@ func _player_attack(attacker: Unit, target: Unit) -> void:
 
 	var hit: bool = roll["net"] > 0
 	anim_busy = true
+	_play_attack_anim(attacker)
 	await _fire_tracer(attacker, target, hit, Color(1.0, 0.9, 0.5))
 	anim_busy = false
 	if hit:
@@ -1137,6 +1307,7 @@ func _kill_unit(u: Unit) -> void:
 		select_ring.visible = false
 	if selected == u:
 		selected = null
+	u.play_die()
 	# Todes-Animation: kurz zusammenschrumpfen, dann entfernen.
 	var tw := u.create_tween()
 	tw.tween_property(u, "scale", Vector3(0.05, 0.05, 0.05), 0.25)
@@ -1174,6 +1345,8 @@ func _commit(u: Unit) -> bool:
 	if u.activated:
 		return false
 	active_unit = u
+	u.charges_used = 0
+	u.charge_ready = false
 	if u.overwatch:
 		u.set_overwatch(false)  # Eine neue Aktivierung ersetzt alten Overwatch
 	_update_labels()
@@ -1301,6 +1474,8 @@ func _swarm_step() -> void:
 		# Warteschlange stand ('is'-Check auf freigegebene Objekte crasht).
 		if not is_instance_valid(enemy) or not units.has(enemy):
 			continue
+		enemy.charges_used = 0
+		enemy.charge_ready = false
 		# Ankündigung: Wer handelt gerade? (Marker + Name, kurze Pause)
 		turn_label.text = "Runde %d · Swarm: %s …" % [round_num, enemy.unit_name]
 		target_marker.position = _cell_to_world(enemy.cell) + Vector3(0, 0.03, 0)
@@ -1387,9 +1562,10 @@ func _drone_activation(enemy: Unit) -> void:
 		if best != enemy.cell:
 			var path := grid.find_path(enemy.cell, best, occ)
 			if path.size() >= 2:
-				await _walk_enemy_with_overwatch(enemy, path)
+				_track_charge(enemy, path[0], path[path.size() - 1])
+				await _walk_enemy_with_reactions(enemy, path)
 	if not units.has(enemy):
-		return  # im Overwatch-Feuer gefallen
+		return  # im Overwatch-Feuer oder ZoC-Gegenangriff gefallen
 
 	for p in _players():
 		if _manhattan(enemy.cell, p.cell) == 1:
@@ -1419,7 +1595,7 @@ func _spitter_activation(enemy: Unit) -> void:
 		if best_cell != enemy.cell:
 			var path := grid.find_path(enemy.cell, best_cell, occ)
 			if path.size() >= 2:
-				await _walk_enemy_with_overwatch(enemy, path)
+				await _walk_enemy_with_reactions(enemy, path)
 		if not units.has(enemy):
 			return
 		best = _best_shot_target(enemy)
@@ -1474,6 +1650,7 @@ func _spitter_shot_score(from: Vector2i, sp: Unit) -> int:
 func _enemy_ranged_attack(enemy: Unit, target: Unit) -> void:
 	var roll := _roll_attack(enemy, target)
 	var hit: bool = roll["net"] > 0
+	_play_attack_anim(enemy)
 	await _fire_tracer(enemy, target, hit, Color(0.72, 0.91, 0.43))  # Säure
 	if hit:
 		var res := _apply_attack_result(target, roll)
@@ -1498,9 +1675,10 @@ func _overwatchers_seeing(c: Vector2i) -> Array[Unit]:
 	return result
 
 
-## Bewegt einen Gegner Feld für Feld und unterbricht die Bewegung, sobald
-## er in die Sichtlinie einer Overwatch-Einheit läuft – die dann feuert.
-func _walk_enemy_with_overwatch(enemy: Unit, path: Array[Vector2i]) -> void:
+## Bewegt einen Gegner Feld für Feld, wertet dabei ZoC-Gegenangriffe aus
+## (siehe _resolve_zoc_exit) und unterbricht die Bewegung, sobald er in die
+## Sichtlinie einer Overwatch-Einheit läuft – die dann feuert.
+func _walk_enemy_with_reactions(enemy: Unit, path: Array[Vector2i]) -> void:
 	var i := 1
 	while i < path.size():
 		var stop := -1
@@ -1516,6 +1694,12 @@ func _walk_enemy_with_overwatch(enemy: Unit, path: Array[Vector2i]) -> void:
 			sub.append(path[k])
 		enemy.walk_path(sub, TILE)
 		await enemy.move_finished
+		if not units.has(enemy):
+			return
+		for k in range(i, end_idx + 1):
+			await _resolve_zoc_exit(enemy, path[k - 1], path[k])
+			if not units.has(enemy):
+				return
 		if stop == -1:
 			return
 		for w in _overwatchers_seeing(enemy.cell):
@@ -1523,6 +1707,89 @@ func _walk_enemy_with_overwatch(enemy: Unit, path: Array[Vector2i]) -> void:
 			if not units.has(enemy):
 				return  # Ziel gefallen, Bewegung endet hier
 		i = end_idx + 1
+
+
+## Bewegt eine Spieler-Einheit Feld für Feld und wertet dabei ZoC-
+## Gegenangriffe der Gegner aus - läuft NACH der Bewegungsanimation, um
+## die bestehende move_finished-Signalkette (Aktivierungsende etc.) nicht
+## zu stören (siehe _on_any_move_finished).
+func _walk_with_reactions(mover: Unit, path: Array[Vector2i]) -> void:
+	mover.walk_path(path, TILE)
+	await mover.move_finished
+	if not units.has(mover):
+		return
+	for i in range(1, path.size()):
+		await _resolve_zoc_exit(mover, path[i - 1], path[i])
+		if not units.has(mover):
+			return
+
+
+## ZoC-Gegenangriff (dice-system.md Abschnitt 3): verlässt 'mover' beim
+## Schritt von 'from_cell' nach 'to_cell' die Zone of Control eines oder
+## mehrerer Gegner (angrenzend vorher, nicht mehr angrenzend danach),
+## greift EINER von ihnen kostenlos im Nahkampf an (3-Würfel-Basispool,
+## kein Charge-Bonus) - der mit dem höchsten Nahkampf-Wert, bei Gleichstand
+## zufällig. Werden gleichzeitig mehrere ZoCs verlassen, bekommt dieser
+## Angriff maximal +1 Bonuswürfel (fester Deckel, unabhängig von der
+## Zahl der verlassenen ZoCs). Funktioniert unabhängig vom
+## Aktivierungsstatus des Gegners - ein ZoC-Gegenangriff kostet ihn nichts.
+func _resolve_zoc_exit(mover: Unit, from_cell: Vector2i, to_cell: Vector2i) -> void:
+	var opponents := _enemies() if mover.faction == Unit.Faction.PLAYER else _players()
+	var leaving: Array[Unit] = []
+	for o in opponents:
+		if is_instance_valid(o) and units.has(o) and Combat.leaves_zoc(from_cell, to_cell, o.cell):
+			leaving.append(o)
+	if leaving.is_empty():
+		return
+	leaving.shuffle()  # Zufalls-Tiebreak bei gleichem Nahkampf-Wert
+	var attacker: Unit = leaving[0]
+	for o in leaving:
+		if o.melee > attacker.melee:
+			attacker = o
+	var bonus := 1 if leaving.size() > 1 else 0
+	_spawn_popup(attacker.position, "ZOC!", Color("ff9d6a"))
+	await get_tree().create_timer(0.2).timeout
+	attacker.play_attack_melee()  # ZoC-Gegenangriff ist immer Nahkampf
+	var roll := _roll_attack(attacker, mover, bonus, true)
+	if roll["net"] > 0:
+		_apply_attack_result(mover, roll)
+	else:
+		_spawn_popup(mover.position, "AUSGEWICHEN", Color("cfd6e4"))
+	await get_tree().create_timer(0.15).timeout
+
+
+## Liegt 'cell' in der Zone of Control mindestens eines Gegners von
+## 'mover_faction' (siehe Combat.in_zoc)?
+func _in_enemy_zoc(cell: Vector2i, mover_faction: int) -> bool:
+	var opponents := _enemies() if mover_faction == Unit.Faction.PLAYER else _players()
+	for o in opponents:
+		if is_instance_valid(o) and units.has(o) and Combat.in_zoc(cell, o.cell):
+			return true
+	return false
+
+
+## Charge (dice-system.md Abschnitt 3): bewegt sich 'mover' aktiv NEU in
+## gegnerische ZoC hinein (vorher nicht angrenzend, danach schon), bekommt
+## sein nächster Nahkampfangriff +2 Bonuswürfel - gedeckelt auf 2x pro
+## Aktivierung (reguläre Bewegung + Dash).
+func _track_charge(mover: Unit, from_cell: Vector2i, to_cell: Vector2i) -> void:
+	if mover.charges_used >= 2:
+		return
+	if not _in_enemy_zoc(from_cell, mover.faction) and _in_enemy_zoc(to_cell, mover.faction):
+		mover.charge_ready = true
+		mover.charges_used += 1
+
+
+## Flanking (dice-system.md Abschnitt 3): +1 Bonuswürfel (fest gedeckelt),
+## wenn mindestens ein Verbündeter des Angreifers ebenfalls in der Zone of
+## Control desselben Ziels steht. Skaliert NICHT mit der Zahl der
+## Verbündeten.
+func _flanking(attacker: Unit, target: Unit) -> bool:
+	var allies := _players() if attacker.faction == Unit.Faction.PLAYER else _enemies()
+	for a in allies:
+		if a != attacker and is_instance_valid(a) and units.has(a) and Combat.in_zoc(a.cell, target.cell):
+			return true
+	return false
 
 
 ## Ein einzelner Reaktionsschuss. Kostet den Overwatch-Status.
@@ -1538,6 +1805,7 @@ func _overwatch_shot(w: Unit, enemy: Unit) -> void:
 	var hit: bool = roll["net"] > 0
 	_spawn_popup(w.position, "OVERWATCH!", Color("8fd8ff"))
 	await get_tree().create_timer(0.35).timeout
+	_play_attack_anim(w)
 	await _fire_tracer(w, enemy, hit, Color(1.0, 0.9, 0.5))
 	if hit:
 		var res := _apply_attack_result(enemy, roll)
@@ -1550,6 +1818,7 @@ func _overwatch_shot(w: Unit, enemy: Unit) -> void:
 
 func _enemy_attack(enemy: Unit, target: Unit) -> void:
 	# Kurzer "Biss"-Ausfall in Richtung Ziel.
+	_play_attack_anim(enemy)
 	var origin := enemy.position
 	var tw := enemy.create_tween()
 	tw.tween_property(enemy, "position", origin.lerp(target.position, 0.35), 0.12)
