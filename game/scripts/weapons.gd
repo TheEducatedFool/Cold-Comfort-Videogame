@@ -62,7 +62,7 @@ static func heavy_machine_gun() -> Weapon:
 	w.weapon_name = "Schweres MG"
 	w.weapon_range = 9
 	w.ap = 1
-	w.model_path = BLASTER_KIT + "blaster-e.glb"
+	w.model_path = BLASTER_KIT + "blaster-f.glb"
 	return w
 
 
@@ -74,7 +74,7 @@ static func combat_shotgun() -> Weapon:
 	w.weapon_name = "Kampfschrotflinte"
 	w.weapon_range = 4
 	w.lethal = 1
-	w.model_path = BLASTER_KIT + "blaster-i.glb"
+	w.model_path = BLASTER_KIT + "blaster-a.glb"
 	return w
 
 

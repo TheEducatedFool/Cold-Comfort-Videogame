@@ -74,6 +74,12 @@ var cooldowns: Dictionary = {}   # Fähigkeits-ID -> verbleibende Runden
 var charge_ready: bool = false   # naechster Nahkampfangriff bekommt +2 Wuerfel
 var charges_used: int = 0        # Deckel: max. 2 pro Aktivierung
 
+# --- Aktions-Wiederholungssperre (dice-system.md Abschnitt 1: "Dieselbe
+# Aktion nicht zweimal in derselben Aktivierung") ---------------------------
+const DASH_RANGE := 3            # zweite Bewegung in einer Aktivierung = Dash
+var moves_used: int = 0          # 0 = naechste Bewegung volle move_range, sonst Dash
+var used_action_types: Array[String] = []  # z.B. "ranged_attack"/"melee_attack"
+
 var hp_label: Label3D
 var shield_bubble: MeshInstance3D
 
@@ -126,13 +132,15 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 
 	# Fernkampfwaffe sichtbar in die rechte Hand geben, falls die Waffe ein
 	# Modell hat (Nahkampfwaffen/Swarm-Waffen haben aktuell keins, siehe
-	# weapons.gd) - Position ist grob geschätzt (kein visueller Check
-	# möglich), ggf. nach Rückmeldung nachjustieren.
+	# weapons.gd). Ruhehaltung: schräg nach unten am Körper getragen, nicht
+	# nach vorne zeigend - Position/Rotation grob geschätzt (kein visueller
+	# Check möglich), ggf. nach Rückmeldung nachjustieren.
 	if ranged_weapon != null and ranged_weapon.model_path != "" and _part_arm_right != null:
 		var weapon_scene: PackedScene = load(ranged_weapon.model_path)
 		var weapon_inst: Node3D = weapon_scene.instantiate()
 		_part_arm_right.add_child(weapon_inst)
-		weapon_inst.position = Vector3(0.06, -0.32, -0.02)
+		weapon_inst.position = Vector3(0.05, -0.3, 0.0)
+		weapon_inst.rotation_degrees = Vector3(-75.0, 0.0, 0.0)
 		weapon_inst.scale = Vector3.ONE * 0.7
 	play_idle()
 
@@ -174,9 +182,14 @@ func setup(p_name: String, p_faction: int, color: Color, stats: Dictionary) -> v
 	hp_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	hp_label.no_depth_test = true
 	hp_label.position.y = 2.1
-	hp_label.font_size = 40
-	hp_label.outline_size = 10
-	hp_label.pixel_size = 0.008
+	# Höhere font_size + passend kleinere pixel_size hält die Weltgröße
+	# gleich, gibt aber mehr Textur-Auflösung für die Mipmap-Kette -
+	# zusammen mit LINEAR_WITH_MIPMAPS verhindert das Pixel-Flimmern beim
+	# Herauszoomen (Kamils Meldung).
+	hp_label.font_size = 80
+	hp_label.outline_size = 20
+	hp_label.pixel_size = 0.004
+	hp_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	add_child(hp_label)
 	_update_visuals()
 
@@ -275,22 +288,29 @@ func play_walk() -> void:
 
 
 ## Fernkampf: kurzer Rückstoß im rechten (Waffen-)Arm.
+## Fernkampf: kurzer, kleiner Rückstoß-Zucker.
 func play_attack_ranged() -> void:
-	_recoil(_part_arm_right, 0.4)
-
-
-## Nahkampf: der rechte Arm schlägt einmal nach vorne aus.
-func play_attack_melee() -> void:
-	_recoil(_part_arm_right, 1.4)
-
-
-func _recoil(part: Node3D, angle: float) -> void:
-	if part == null:
+	if _part_arm_right == null:
 		return
-	var rest: Vector3 = _rest_rotation.get(part, part.rotation)
+	var rest: Vector3 = _rest_rotation.get(_part_arm_right, _part_arm_right.rotation)
 	var t := create_tween()
-	t.tween_property(part, "rotation:x", rest.x - angle, 0.08)
-	t.tween_property(part, "rotation:x", rest.x, 0.18)
+	t.tween_property(_part_arm_right, "rotation:x", rest.x - 0.4, 0.08)
+	t.tween_property(_part_arm_right, "rotation:x", rest.x, 0.18)
+
+
+## Nahkampf: bewusst anders als der Schuss-Rückstoß - deutliches Ausholen
+## nach hinten/oben, dann kraftvoller Schlag nach vorne/unten, erst danach
+## zurück in die Ruhepose (3 Phasen statt 2, größerer Ausschlag).
+func play_attack_melee() -> void:
+	if _part_arm_right == null:
+		return
+	var rest: Vector3 = _rest_rotation.get(_part_arm_right, _part_arm_right.rotation)
+	var t := create_tween()
+	t.tween_property(_part_arm_right, "rotation:x", rest.x - 2.0, 0.14) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_property(_part_arm_right, "rotation:x", rest.x + 0.7, 0.12) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	t.tween_property(_part_arm_right, "rotation:x", rest.x, 0.16)
 
 
 ## Kippt die ganze Einheit zur Seite - main.gd lässt sie danach zusätzlich
@@ -300,6 +320,12 @@ func play_die() -> void:
 	var t := create_tween()
 	t.tween_property(self, "rotation:z", deg_to_rad(85.0), 0.35) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+## Reichweite der NÄCHSTEN Bewegungsaktion: volle move_range beim ersten
+## Mal in dieser Aktivierung, danach nur noch DASH_RANGE (Dash).
+func effective_move_range() -> int:
+	return move_range if moves_used == 0 else DASH_RANGE
 
 
 func is_alive() -> bool:

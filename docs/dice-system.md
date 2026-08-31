@@ -14,14 +14,18 @@
   8 bedeutet „Erfolg bei 8 oder niedriger gewürfelt".
 - **Drei getrennte Stat-Werte** pro Kämpfer (1–10): Fernkampf, Nahkampf,
   Verteidigung. Basiswerte pro Klasse: `classes.md` Abschnitt 8.
-- **Bewegung:** einheitlich 6 Felder für alle Klassen. Varianz kommt über
+- **Bewegung:** einheitlich 6 Felder für alle Klassen, aber nur für die
+  ERSTE Bewegungsaktion einer Aktivierung. Varianz kommt über
   Skills/Ausrüstung, nicht über einen Basiswert.
-- **Sprint/Dash:** zweite Aktion kann als Dash (+3 Felder) genutzt werden
-  – bis zu 9 Felder Gesamtbewegung, wenn beide Aktionspunkte investiert
-  werden.
+- **Sprint/Dash (Klarstellung 2026-09-01):** Eine zweite, separate
+  Bewegungsaktion in derselben Aktivierung zählt als Dash und ist auf
+  3 Felder begrenzt (nicht kombiniert mit der ersten Bewegung zu einer
+  einzigen 9-Felder-Bewegung).
 - **Aktionsökonomie:** 2 Aktionen pro Aktivierung. Dieselbe Aktion nicht
-  zweimal in derselben Aktivierung (kein Doppel-Bewegen, kein
-  Doppel-Schießen) – außer eine Fähigkeit erlaubt das explizit.
+  zweimal in derselben Aktivierung (kein Doppel-Schießen, kein Doppel-
+  Nahkampf) – außer eine Fähigkeit erlaubt das explizit. Bewegung ist die
+  Ausnahme: eine zweite Bewegung ist erlaubt, zählt dann aber als Dash
+  (siehe oben).
 - **Natürliche 10 = automatischer Fehlschlag**, pro Würfel (nicht pro
   ganzer Probe) – die übrigen Würfel im Pool werten normal weiter.
 

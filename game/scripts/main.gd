@@ -24,16 +24,23 @@ extends Node3D
 ##   1 / 2                      -> Klassen-Fähigkeit (Esc bricht Zielwahl ab)
 ##   Q / E (gedrückt halten)    -> Kamera stufenlos drehen
 ##   Mausrad                    -> Kamera zoomen
-##   Rechte Maustaste ziehen    -> Kamera frei pannen
+##   WASD oder rechte Maustaste ziehen -> Kamera frei pannen
 ##   Enter oder Button          -> Zug beenden (dann zieht der Swarm)
 ##   R                          -> Neustart nach Sieg/Niederlage
 
 # --- Spielregeln / Stellschrauben -----------------------------------------
 
-const GRID_W := 22
-const GRID_H := 40
+const GRID_W := 18
+const GRID_H := 18
 const TILE := 2.0
 const ACTIONS_PER_TURN := 2
+
+## Die Space-Station-Bodenplatte (floor.glb) hat echte Dicke (0.3 in ihrer
+## Ursprungsgröße, unskaliert in Y) statt der alten, fast flachen Platte -
+## alle Boden-Overlays (Hover/Ziel/Auswahlring/Bewegungsreichweite/
+## Sichtlinien-Debug) müssen darüber liegen, sonst verschwinden sie unter
+## der Bodenoberfläche.
+const FLOOR_SURFACE_Y := 0.3
 
 const CAM_RADIUS := 23.0
 const CAM_HEIGHT := 18.0
@@ -42,6 +49,7 @@ const CAM_ZOOM_STEP := 2.0       # Groessenaenderung pro Mausrad-Tick
 const CAM_ZOOM_MIN := 8.0
 const CAM_ZOOM_MAX := 50.0
 const CAM_PAN_BUTTON := MOUSE_BUTTON_RIGHT
+const CAM_PAN_KEY_SPEED := 20.0  # Welteinheiten/Sekunde bei camera.size=24
 
 # Kenney "Space Station Kit" Platzhalter-Modelle (CC0, siehe
 # game/assets/kenney_space_station/License.txt) - passt vom Look besser
@@ -53,6 +61,8 @@ const MODEL_WALL := preload("res://assets/kenney_space_station/wall.glb")
 const MODEL_WALL_WINDOW := preload("res://assets/kenney_space_station/wall-window.glb")
 const MODEL_CRATE := preload("res://assets/kenney_space_station/container.glb")
 const MODEL_CRATE_WIDE := preload("res://assets/kenney_space_station/container-wide.glb")
+const MODEL_WALL_CORNER := preload("res://assets/kenney_space_station/wall-corner.glb")
+const MODEL_BARRIER := preload("res://assets/kenney_space_station/structure-barrier.glb")
 
 const MEND_RANGE := 8.0
 const MEND_HEAL := 2
@@ -68,34 +78,44 @@ const ABILITIES := {
 
 # Blockierte Felder der Testkarte: Vector2i -> Hindernishöhe in Metern.
 # Niedrig (1.0) = Kiste / halbe Deckung, hoch (2.2) = Wand / volle Deckung.
-# Wird in _generate_obstacles() befüllt (22x40 ist zu groß für eine von
-# Hand aufgezählte const-Liste) - kein echtes Level-Design, nur genug
-# Struktur (Raumtrenner mit Türlücken, verstreute Kisten) für Deckungs-/
-# Sichtlinien-Taktik auf der größeren Karte.
+# Wird in _generate_obstacles() befüllt - kein echtes Level-Design, nur
+# genug Struktur für Deckungs-/Sichtlinien-Taktik.
 var OBSTACLES: Dictionary = {}
 
+## Felder, die _generate_obstacles() freihalten muss (Start-Zellen aus
+## _spawn_units() - müssen synchron gehalten werden, da Obstacles vor den
+## Einheiten gebaut werden).
+const SPAWN_CELLS := [
+	Vector2i(3, 2), Vector2i(6, 2), Vector2i(9, 2), Vector2i(12, 2), Vector2i(15, 2),
+	Vector2i(4, 9), Vector2i(13, 8), Vector2i(6, 14), Vector2i(12, 15), Vector2i(9, 11), Vector2i(15, 13),
+]
 
-## Baut ein einfaches "Korridor mit Räumen"-Muster: Wandreihen alle 8
-## Felder mit je 2 Türlücken (Position wechselt zeilenweise), dazwischen
-## verstreute Kisten als halbe Deckung.
+
+## Kurze, unregelmäßig platzierte Wandsegmente (2-4 Felder) als grobe
+## Raumteiler plus verstreute Kisten - fester Seed für eine reproduzierbare,
+## aber weniger regelmäßig/symmetrisch wirkende Verteilung als eine
+## durchgehende Reihen-/Rasteranordnung. Hält die Start-Zellen (SPAWN_CELLS)
+## und einen 1-Feld-Rand am Kartenrand frei.
 func _generate_obstacles() -> Dictionary:
 	var obs: Dictionary = {}
-	var wall_rows := [8, 16, 24, 32]
-	for i in wall_rows.size():
-		var y: int = wall_rows[i]
-		var gaps: Array = [5, 6, 15, 16] if i % 2 == 0 else [9, 10, 18, 19]
-		for x in range(GRID_W):
-			if x in gaps:
-				continue
-			obs[Vector2i(x, y)] = 2.2
-	var room_bands := [[1, 6], [10, 14], [18, 22], [26, 30], [34, 38]]
-	for band in room_bands:
-		var y0: int = band[0]
-		var y1: int = band[1]
-		var span: int = y1 - y0 + 1
-		for x in [2, 6, 10, 14, 18]:
-			var y: int = y0 + ((x * 3 + y0) % span)
-			obs[Vector2i(x, y)] = 1.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260901
+
+	for i in 8:
+		var length := rng.randi_range(2, 4)
+		var horizontal := rng.randf() < 0.5
+		var start_x := rng.randi_range(1, GRID_W - 2 - (length - 1 if horizontal else 0))
+		var start_y := rng.randi_range(1, GRID_H - 2 - (0 if horizontal else length - 1))
+		for j in length:
+			var c := Vector2i(start_x + (j if horizontal else 0), start_y + (0 if horizontal else j))
+			if not SPAWN_CELLS.has(c):
+				obs[c] = 2.2
+
+	for i in 16:
+		var c := Vector2i(rng.randi_range(1, GRID_W - 2), rng.randi_range(1, GRID_H - 2))
+		if not obs.has(c) and not SPAWN_CELLS.has(c):
+			obs[c] = 1.0
+
 	return obs
 
 # Kampfwerte der 5 Klassen (docs/classes.md Abschnitt 8, exakte
@@ -177,7 +197,7 @@ const SHIP_HURT_LINES := [
 	"Ship: \"Autsch. Sagt man das so? Autsch.\"",
 ]
 
-const INFO_DEFAULT := "Klick: bewegen/Aktionsmenü · Tab: Einheit · O: Overwatch · 1/2: Fähigkeit · Q/E: drehen · Rad: zoomen · Rechtsklick+Ziehen: pannen · L: Sichtlinien · Enter: Aktivierung beenden"
+const INFO_DEFAULT := "Klick: bewegen/Aktionsmenü · Tab: Einheit · O: Overwatch · 1/2: Fähigkeit · Q/E: drehen · Rad: zoomen · WASD/Rechtsklick+Ziehen: pannen · L: Sichtlinien · Enter: Aktivierung beenden"
 
 # --- Zustand ---------------------------------------------------------------
 
@@ -284,21 +304,40 @@ func _build_floor() -> void:
 			if OBSTACLES.has(c):
 				var h: float = OBSTACLES[c]
 				var inst: Node3D
-				var variant := (x + y) % 2 == 0
+				# Pseudo-zufällige Variante aus der Zellkoordinate (nicht nur
+				# (x+y)%2 - wirkt sonst wie ein Schachbrett) für mehr optische
+				# Abwechslung zwischen den drei Modellen je Deckungsstufe.
+				var variant := (x * 7 + y * 13) % 3
 				# Kenney-Modelle sind an der Basis pivotiert (Y=0 = Boden),
 				# ihre AABB in der Ursprungsgröße bestimmt den Skalierungsfaktor
 				# auf die Zielmaße (Feldbreite x Höhe x Feldtiefe). wall.glb/
-				# wall-window.glb: (1.0, 1.0, 0.3). container.glb: (0.575, 0.6,
-				# 0.575). container-wide.glb: (0.6, 0.7, 0.6).
+				# wall-window.glb: (1.0, 1.0, 0.3). wall-corner.glb: (0.8, 1.0,
+				# 0.8). container.glb: (0.575, 0.6, 0.575). container-wide.glb:
+				# (0.6, 0.7, 0.6). structure-barrier.glb: (1.1, 1.0, 1.1).
 				if h >= Combat.FULL_COVER_HEIGHT:
-					inst = MODEL_WALL.instantiate() if variant else MODEL_WALL_WINDOW.instantiate()
-					inst.scale = Vector3(TILE * 0.96, h, (TILE * 0.96) / 0.3)
-				elif variant:
-					inst = MODEL_CRATE.instantiate()
-					inst.scale = Vector3((TILE * 0.8) / 0.575, h / 0.6, (TILE * 0.8) / 0.575)
+					match variant:
+						0:
+							inst = MODEL_WALL.instantiate()
+							inst.scale = Vector3(TILE * 0.96, h, (TILE * 0.96) / 0.3)
+						1:
+							inst = MODEL_WALL_WINDOW.instantiate()
+							inst.scale = Vector3(TILE * 0.96, h, (TILE * 0.96) / 0.3)
+						_:
+							inst = MODEL_WALL_CORNER.instantiate()
+							inst.scale = Vector3.ONE * ((TILE * 0.96) / 0.8)
+							inst.scale.y = h
 				else:
-					inst = MODEL_CRATE_WIDE.instantiate()
-					inst.scale = Vector3((TILE * 0.8) / 0.6, h / 0.7, (TILE * 0.8) / 0.6)
+					match variant:
+						0:
+							inst = MODEL_CRATE.instantiate()
+							inst.scale = Vector3((TILE * 0.8) / 0.575, h / 0.6, (TILE * 0.8) / 0.575)
+						1:
+							inst = MODEL_CRATE_WIDE.instantiate()
+							inst.scale = Vector3((TILE * 0.8) / 0.6, h / 0.7, (TILE * 0.8) / 0.6)
+						_:
+							inst = MODEL_BARRIER.instantiate()
+							inst.scale = Vector3.ONE * ((TILE * 0.8) / 1.1)
+							inst.scale.y = h
 				inst.position = Vector3(x * TILE, 0.0, y * TILE)
 				add_child(inst)
 			else:
@@ -307,15 +346,15 @@ func _build_floor() -> void:
 				tile.position = Vector3(x * TILE, 0.0, y * TILE)
 				add_child(tile)
 
-	hover_marker = _make_quad(mat_hover, 0.03)
+	hover_marker = _make_quad(mat_hover, FLOOR_SURFACE_Y + 0.03)
 	hover_marker.visible = false
 	add_child(hover_marker)
 
-	target_marker = _make_quad(mat_target, 0.03)
+	target_marker = _make_quad(mat_target, FLOOR_SURFACE_Y + 0.03)
 	target_marker.visible = false
 	add_child(target_marker)
 
-	select_ring = _make_quad(mat_ring, 0.02)
+	select_ring = _make_quad(mat_ring, FLOOR_SURFACE_Y + 0.02)
 	select_ring.visible = false
 	add_child(select_ring)
 
@@ -391,6 +430,15 @@ func _zoom_camera(delta_size: float) -> void:
 	camera.size = clampf(camera.size + delta_size, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
 
 
+## Boden-Achsen der aktuellen Kamera-Ausrichtung (rechts/vorne, auf die
+## XZ-Ebene projiziert) - gemeinsame Basis für Maus- und Tastatur-Pan.
+func _camera_ground_axes() -> Array:
+	var basis := camera.global_transform.basis
+	var right := Vector3(basis.x.x, 0.0, basis.x.z).normalized()
+	var forward := Vector3(-basis.z.x, 0.0, -basis.z.z).normalized()
+	return [right, forward]
+
+
 ## Rechte Maustaste ziehen: Kamera frei pannen. Verschiebt map_center
 ## bildschirmparallel zur aktuellen Kamera-Ausrichtung - 'grab and drag',
 ## das Tempo skaliert automatisch mit dem aktuellen Zoom (camera.size).
@@ -403,10 +451,34 @@ func _pan_camera(screen_delta: Vector2) -> void:
 	if cam_tween != null and cam_tween.is_valid():
 		cam_tween.kill()  # manuelles Pannen hat Vorrang vor dem Auto-Zentrieren
 	var units_per_pixel := camera.size / viewport_h
-	var basis := camera.global_transform.basis
-	var right := Vector3(basis.x.x, 0.0, basis.x.z).normalized()
-	var forward := Vector3(-basis.z.x, 0.0, -basis.z.z).normalized()
+	var axes := _camera_ground_axes()
+	var right: Vector3 = axes[0]
+	var forward: Vector3 = axes[1]
 	map_center += (-right * screen_delta.x + forward * screen_delta.y) * units_per_pixel
+	_apply_cam_yaw(cam_yaw)
+
+
+## WASD gedrückt halten: Kamera frei pannen (Tastatur-Variante von
+## _pan_camera). Tempo skaliert mit dem aktuellen Zoom.
+func _pan_camera_keys(delta: float) -> void:
+	var input := Vector2.ZERO
+	if Input.is_key_pressed(KEY_A):
+		input.x -= 1.0
+	if Input.is_key_pressed(KEY_D):
+		input.x += 1.0
+	if Input.is_key_pressed(KEY_W):
+		input.y += 1.0
+	if Input.is_key_pressed(KEY_S):
+		input.y -= 1.0
+	if input == Vector2.ZERO:
+		return
+	if cam_tween != null and cam_tween.is_valid():
+		cam_tween.kill()
+	var axes := _camera_ground_axes()
+	var right: Vector3 = axes[0]
+	var forward: Vector3 = axes[1]
+	var speed := CAM_PAN_KEY_SPEED * (camera.size / 24.0)
+	map_center += (right * input.x + forward * input.y) * speed * delta
 	_apply_cam_yaw(cam_yaw)
 
 
@@ -414,19 +486,20 @@ func _spawn_units() -> void:
 	# Platzhalter-Trupp aus den 5 aktuellen Klassen (docs/classes.md) -
 	# noch keine benannten Rekruten (kommt mit dem Rekrutierungs-Pool
 	# später), Werte siehe STATS_* oben.
-	# Startraum am "Eingang" (niedrige y) des 22x40-Korridors.
-	_add_unit("Breacher", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, Vector2i(4, 3))
-	_add_unit("Deadeye", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, Vector2i(8, 3))
-	_add_unit("Handler", Unit.Faction.PLAYER, Color("c9b458"), STATS_HANDLER, Vector2i(12, 3))
-	_add_unit("Heavy", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_HEAVY, Vector2i(16, 3))
-	_add_unit("Reiver", Unit.Faction.PLAYER, Color("8a6f9e"), STATS_REIVER, Vector2i(20, 3))
-	# Der Swarm: über die weiteren Räume des Korridors verteilt.
-	_add_unit("Drohne A", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(8, 12))
-	_add_unit("Drohne B", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(16, 13))
-	_add_unit("Drohne C", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(8, 27))
-	_add_unit("Drohne D", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, Vector2i(16, 28))
-	_add_unit("Spitter A", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(12, 20))
-	_add_unit("Spitter B", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, Vector2i(12, 35))
+	# Startzeile am unteren Kartenrand der 18x18-Karte. Positionen siehe
+	# SPAWN_CELLS (muss synchron mit _generate_obstacles() bleiben).
+	_add_unit("Breacher", Unit.Faction.PLAYER, Color("d08a3e"), STATS_BREACHER, SPAWN_CELLS[0])
+	_add_unit("Deadeye", Unit.Faction.PLAYER, Color("6f9fd8"), STATS_DEADEYE, SPAWN_CELLS[1])
+	_add_unit("Handler", Unit.Faction.PLAYER, Color("c9b458"), STATS_HANDLER, SPAWN_CELLS[2])
+	_add_unit("Heavy", Unit.Faction.PLAYER, Color("7a8a6f"), STATS_HEAVY, SPAWN_CELLS[3])
+	_add_unit("Reiver", Unit.Faction.PLAYER, Color("8a6f9e"), STATS_REIVER, SPAWN_CELLS[4])
+	# Der Swarm: über die restliche Karte verteilt.
+	_add_unit("Drohne A", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, SPAWN_CELLS[5])
+	_add_unit("Drohne B", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, SPAWN_CELLS[6])
+	_add_unit("Drohne C", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, SPAWN_CELLS[7])
+	_add_unit("Drohne D", Unit.Faction.SWARM, Color("a33d33"), STATS_DRONE, SPAWN_CELLS[8])
+	_add_unit("Spitter A", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, SPAWN_CELLS[9])
+	_add_unit("Spitter B", Unit.Faction.SWARM, Color("7d5a9e"), STATS_SPITTER, SPAWN_CELLS[10])
 
 
 func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, start: Vector2i) -> void:
@@ -440,21 +513,33 @@ func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, 
 	units.append(u)
 
 
+## Einheitlicher halbtransparenter dunkler Hintergrund für alle UI-Panels -
+## ohne den ist Text über der 3D-Szene kaum lesbar (Kamils Meldung).
+func _panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.04, 0.05, 0.08, 0.75)
+	style.set_content_margin_all(10)
+	style.set_corner_radius_all(6)
+	return style
+
+
 func _build_ui() -> void:
 	var ui := CanvasLayer.new()
 	add_child(ui)
 	ui_layer = ui
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 16)
-	ui.add_child(margin)
+	# Oben links: Titel, Rundenstatus, Aktionen, Fähigkeitenleiste.
+	var top_box := PanelContainer.new()
+	top_box.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	top_box.offset_left = 16
+	top_box.offset_top = 16
+	top_box.add_theme_stylebox_override("panel", _panel_style())
+	top_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(top_box)
 
 	var vbox := VBoxContainer.new()
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(vbox)
+	top_box.add_child(vbox)
 
 	var title := Label.new()
 	title.text = "COLD COMFORT – Prototyp (Würfelpool)"
@@ -492,21 +577,33 @@ func _build_ui() -> void:
 	end_turn_button.pressed.connect(_end_activation)
 	vbox.add_child(end_turn_button)
 
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vbox.add_child(spacer)
+	# Unten links: Kontext-/Hilfetext und Ship-Kommentar.
+	var bottom_box := PanelContainer.new()
+	bottom_box.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	bottom_box.offset_left = 16
+	bottom_box.offset_top = -90
+	bottom_box.offset_right = 700
+	bottom_box.offset_bottom = -16
+	bottom_box.add_theme_stylebox_override("panel", _panel_style())
+	bottom_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(bottom_box)
+
+	var bottom_vbox := VBoxContainer.new()
+	bottom_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom_box.add_child(bottom_vbox)
 
 	info_label = Label.new()
 	info_label.add_theme_font_size_override("font_size", 15)
 	info_label.add_theme_color_override("font_color", Color("aab4c8"))
+	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	info_label.text = INFO_DEFAULT
-	vbox.add_child(info_label)
+	bottom_vbox.add_child(info_label)
 
 	ship_label = Label.new()
 	ship_label.add_theme_font_size_override("font_size", 16)
 	ship_label.add_theme_color_override("font_color", Color("8fb0e8"))
-	vbox.add_child(ship_label)
+	ship_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	bottom_vbox.add_child(ship_label)
 
 	overlay_label = Label.new()
 	overlay_label.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -540,6 +637,7 @@ func _build_ui() -> void:
 	stat_box.offset_top = 16
 	stat_box.offset_right = -16
 	stat_box.offset_bottom = 260
+	stat_box.add_theme_stylebox_override("panel", _panel_style())
 	stat_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(stat_box)
 
@@ -558,6 +656,7 @@ func _build_ui() -> void:
 	log_box.offset_top = -240
 	log_box.offset_right = -16
 	log_box.offset_bottom = -16
+	log_box.add_theme_stylebox_override("panel", _panel_style())
 	log_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(log_box)
 
@@ -626,6 +725,8 @@ func _can_shoot(u: Unit) -> bool:
 func _can_attack_melee(attacker: Unit, target: Unit) -> bool:
 	if attacker.melee_weapon == null:
 		return false
+	if attacker.used_action_types.has("melee_attack"):
+		return false
 	return Combat.in_zoc(attacker.cell, target.cell)
 
 
@@ -636,6 +737,8 @@ func _can_attack_melee(attacker: Unit, target: Unit) -> bool:
 ## nicht angrenzendes Ziel darf man weiterhin normal beschießen.
 func _can_attack_ranged(attacker: Unit, target: Unit) -> bool:
 	if attacker.ranged_weapon == null:
+		return false
+	if attacker.used_action_types.has("ranged_attack"):
 		return false
 	if Combat.in_zoc(attacker.cell, target.cell):
 		return false
@@ -726,6 +829,7 @@ func _process(delta: float) -> void:
 		if cam_tween != null and cam_tween.is_valid():
 			cam_tween.kill()
 		_apply_cam_yaw(cam_yaw + rotate_dir * CAM_ROTATE_SPEED * delta)
+	_pan_camera_keys(delta)
 
 
 func _cell_under_mouse(screen_pos: Vector2) -> Variant:
@@ -793,6 +897,7 @@ func _try_move_selected(c: Vector2i) -> bool:
 	_clear_highlights()
 	hover_marker.visible = false
 	_track_charge(selected, path[0], path[path.size() - 1])
+	selected.moves_used += 1
 	_walk_with_reactions(selected, path)
 	_update_labels()
 	return true
@@ -854,11 +959,11 @@ func _update_hover(screen_pos: Vector2) -> void:
 			return
 		if pending_ability == "mend" and t.faction == Unit.Faction.PLAYER \
 				and _dist(selected.cell, t.cell) <= MEND_RANGE:
-			hover_marker.position = _cell_to_world(t.cell) + Vector3(0, 0.03, 0)
+			hover_marker.position = _cell_to_world(t.cell) + Vector3(0, FLOOR_SURFACE_Y + 0.03, 0)
 			hover_marker.visible = true
 		elif pending_ability == "shock" and t.faction == Unit.Faction.SWARM \
 				and _dist(selected.cell, t.cell) <= SHOCK_RANGE:
-			target_marker.position = _cell_to_world(t.cell) + Vector3(0, 0.03, 0)
+			target_marker.position = _cell_to_world(t.cell) + Vector3(0, FLOOR_SURFACE_Y + 0.03, 0)
 			target_marker.visible = true
 		return
 
@@ -871,7 +976,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 	_show_unit_stats(u if u != null else selected)
 
 	if u != null and u.faction == Unit.Faction.SWARM and selected != null and _can_shoot(selected):
-		target_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
+		target_marker.position = _cell_to_world(c) + Vector3(0, FLOOR_SURFACE_Y + 0.03, 0)
 		target_marker.visible = true
 		var previews: Array[String] = []
 		if _can_attack_ranged(selected, u):
@@ -904,7 +1009,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 			info_label.text = "Ziel: %s – %s%s · Klick für Aktionsmenü" \
 				% [u.unit_name, " / ".join(previews), def_txt]
 	elif highlight_nodes.has(c):
-		hover_marker.position = _cell_to_world(c) + Vector3(0, 0.03, 0)
+		hover_marker.position = _cell_to_world(c) + Vector3(0, FLOOR_SURFACE_Y + 0.03, 0)
 		hover_marker.visible = true
 
 
@@ -1069,7 +1174,7 @@ func _select(u: Unit) -> void:
 	if select_ring.get_parent() != null:
 		select_ring.get_parent().remove_child(select_ring)
 	u.add_child(select_ring)
-	select_ring.position = Vector3(0, 0.02, 0)
+	select_ring.position = Vector3(0, FLOOR_SURFACE_Y + 0.02, 0)
 	select_ring.visible = true
 	_center_camera_on(u.position)
 	_refresh_highlights()
@@ -1182,12 +1287,12 @@ func _refresh_highlights() -> void:
 		return
 	if not _can_move(selected) or selected.is_moving:
 		return
-	var reach := grid.reachable(selected.cell, selected.move_range, _occupied_cells(selected))
+	var reach := grid.reachable(selected.cell, selected.effective_move_range(), _occupied_cells(selected))
 	for c in reach:
 		if c == selected.cell:
 			continue
-		var quad := _make_quad(mat_highlight, 0.02)
-		quad.position = _cell_to_world(c) + Vector3(0, 0.02, 0)
+		var quad := _make_quad(mat_highlight, FLOOR_SURFACE_Y + 0.02)
+		quad.position = _cell_to_world(c) + Vector3(0, FLOOR_SURFACE_Y + 0.02, 0)
 		add_child(quad)
 		highlight_nodes[c] = quad
 
@@ -1223,8 +1328,8 @@ func _refresh_los_debug() -> void:
 					mat = mat_los_ok
 				else:
 					mat = mat_los_far
-			var quad := _make_quad(mat, 0.015)
-			quad.position = _cell_to_world(c) + Vector3(0, 0.015, 0)
+			var quad := _make_quad(mat, FLOOR_SURFACE_Y + 0.015)
+			quad.position = _cell_to_world(c) + Vector3(0, FLOOR_SURFACE_Y + 0.015, 0)
 			add_child(quad)
 			los_nodes.append(quad)
 
@@ -1237,9 +1342,10 @@ func _spawn_popup(world_pos: Vector3, text: String, color: Color) -> void:
 	lbl.text = text
 	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lbl.no_depth_test = true
-	lbl.font_size = 56
-	lbl.outline_size = 12
-	lbl.pixel_size = 0.012
+	lbl.font_size = 112
+	lbl.outline_size = 24
+	lbl.pixel_size = 0.006
+	lbl.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	lbl.modulate = color
 	lbl.position = world_pos + Vector3(0, 2.6, 0)
 	add_child(lbl)
@@ -1423,6 +1529,7 @@ func _player_attack(attacker: Unit, target: Unit, use_melee: bool) -> void:
 	# KEINEN zusätzlichen Aktionspunkt - _roll_attack verbraucht
 	# charge_ready gleich mit, daher hier VOR dem Aufruf sichern.
 	var charge_free := use_melee and attacker.charge_ready
+	attacker.used_action_types.append("melee_attack" if use_melee else "ranged_attack")
 	var roll := _roll_attack(attacker, target, use_melee)
 	if attacker.free_shot:
 		attacker.free_shot = false  # Slug-Rush-Freischuss verbraucht
@@ -1498,6 +1605,8 @@ func _commit(u: Unit) -> bool:
 	active_unit = u
 	u.charges_used = 0
 	u.charge_ready = false
+	u.moves_used = 0
+	u.used_action_types.clear()
 	if u.overwatch:
 		u.set_overwatch(false)  # Eine neue Aktivierung ersetzt alten Overwatch
 	_update_labels()
@@ -1627,9 +1736,11 @@ func _swarm_step() -> void:
 			continue
 		enemy.charges_used = 0
 		enemy.charge_ready = false
+		enemy.moves_used = 0
+		enemy.used_action_types.clear()
 		# Ankündigung: Wer handelt gerade? (Marker + Name, kurze Pause)
 		turn_label.text = "Runde %d · Swarm: %s …" % [round_num, enemy.unit_name]
-		target_marker.position = _cell_to_world(enemy.cell) + Vector3(0, 0.03, 0)
+		target_marker.position = _cell_to_world(enemy.cell) + Vector3(0, FLOOR_SURFACE_Y + 0.03, 0)
 		target_marker.visible = true
 		await get_tree().create_timer(0.5).timeout
 		target_marker.visible = false
@@ -1702,7 +1813,7 @@ func _drone_activation(enemy: Unit) -> void:
 
 	if not Combat.in_zoc(enemy.cell, target.cell):
 		var occ := _occupied_cells(enemy)
-		var reach := grid.reachable(enemy.cell, enemy.move_range, occ)
+		var reach := grid.reachable(enemy.cell, enemy.effective_move_range(), occ)
 		var best := enemy.cell
 		var best_d := _manhattan(enemy.cell, target.cell)
 		for c in reach:
@@ -1714,6 +1825,7 @@ func _drone_activation(enemy: Unit) -> void:
 			var path := grid.find_path(enemy.cell, best, occ)
 			if path.size() >= 2:
 				_track_charge(enemy, path[0], path[path.size() - 1])
+				enemy.moves_used += 1
 				await _walk_enemy_with_reactions(enemy, path)
 	if not units.has(enemy):
 		return  # im Overwatch-Feuer oder ZoC-Gegenangriff gefallen
@@ -1731,7 +1843,7 @@ func _spitter_activation(enemy: Unit) -> void:
 	if best["score"] < 0:
 		# Keine Schusslinie: Feld mit der besten Schuss-Aussicht anlaufen.
 		var occ := _occupied_cells(enemy)
-		var reach := grid.reachable(enemy.cell, enemy.move_range, occ)
+		var reach := grid.reachable(enemy.cell, enemy.effective_move_range(), occ)
 		var best_cell := enemy.cell
 		var best_score := _spitter_shot_score(enemy.cell, enemy)
 		var nearest := _nearest_player(enemy.cell)
@@ -1746,6 +1858,7 @@ func _spitter_activation(enemy: Unit) -> void:
 		if best_cell != enemy.cell:
 			var path := grid.find_path(enemy.cell, best_cell, occ)
 			if path.size() >= 2:
+				enemy.moves_used += 1
 				await _walk_enemy_with_reactions(enemy, path)
 		if not units.has(enemy):
 			return
@@ -1801,6 +1914,7 @@ func _spitter_shot_score(from: Vector2i, sp: Unit) -> int:
 
 
 func _enemy_ranged_attack(enemy: Unit, target: Unit) -> void:
+	enemy.used_action_types.append("ranged_attack")
 	var roll := _roll_attack(enemy, target, false)
 	var hit: bool = roll["net"] > 0
 	_play_attack_anim(enemy, false)
@@ -1970,6 +2084,7 @@ func _overwatch_shot(w: Unit, enemy: Unit) -> void:
 
 
 func _enemy_attack(enemy: Unit, target: Unit) -> void:
+	enemy.used_action_types.append("melee_attack")
 	# Kurzer "Biss"-Ausfall in Richtung Ziel.
 	_play_attack_anim(enemy, true)
 	var origin := enemy.position
