@@ -20,29 +20,49 @@
 
 ## Aktueller Codebase-Stand (Basis, auf der aufgebaut wird)
 
-**Wichtiger Vorbehalt:** Der lauffähige Prototyp-Code implementiert noch
-das **alte Prozent-Trefferchancen-System**. Dieses wird durch das in
-`dice-system.md` beschriebene Würfelpool-System ersetzt – das ist der
-nächste große Umbauschritt (siehe `prototype-plan.md`). Folgendes
-funktioniert bereits und bleibt größtenteils bestehen (Grid, Bewegung,
-Aktivierungsmodell, Sichtlinie) bzw. wird gezielt ersetzt (Trefferchance,
-Schadenswürfel, Werte-Tabellen):
+> Stand: 2026-08-31 (nach M1–M4 und drei Playtest-Runden). Bei jeder
+> Doku-Synchronisation mit prüfen.
 
-- Alternierende Einzelaktivierungen (Kill-Team-Prinzip), Commitment ab
-  erstem Aktionspunkt, schwache Gegner aktivieren paarweise.
-- Deckung halb/voll mit Flanking, 3-Strahlen-Sichtlinie mit Kantenglättung
-  (Debug-Taste **L**) – **bleibt unverändert**, siehe `combat.md`.
-- Overwatch (unterbricht Bewegung, −20 % Malus im alten System – entfällt
-  mit dem Würfelpool-Umbau).
-- Schadensmodell Schild → Panzerung → HP als Schichtenreihenfolge –
-  **die Reihenfolge bleibt**, die Verrechnung ändert sich (Netto-Erfolge
-  statt Zufallsschaden, siehe `dice-system.md`).
-- 4 Story-Soldaten (Kane/Roan/Okafor/Reyes – **spielerisch nicht mehr
-  aktuell**, siehe `crew.md`) vs. 4 Drohnen + 2 Spitter, Fähigkeiten
-  Slug Rush/Bulwark/Mend/Shock (Tasten 1/2 – **veraltete Fähigkeitsnamen**,
-  aktuelle Klassen/Skills: `classes.md`, `skills.md`).
-- Drehbare Kamera (Q/E), Tracer/Flinch/Todes-Animationen, Sieg/Niederlage
-  + Neustart (R), Rundenwechsel-Banner.
+Das **Würfelpool-System ist implementiert**, das alte Prozent-System
+vollständig entfernt. Was läuft:
+
+- **Würfelpool-Kern** in `combat.gd`: `roll_pool` (d10, unterboten,
+  natürliche 10 = Fehlschlag, explodierende Krits), `net_successes`,
+  `resolve_net_damage` (Schild → Panzerung → HP mit AP/SD/Lethal).
+  Abgesichert durch `tests/test_dice_pool.gd` und `tests/test_damage.gd`.
+- **Einheiten-Werte** in `unit.gd`: getrennte Zielwerte `ranged`,
+  `melee`, `defense` (1–10) plus HP/Schild/Panzerung. `base_aim` und
+  `falloff` sind entfernt.
+- **Waffen** als eigene Resource (`weapon.gd`) mit Katalog
+  (`weapons.gd`): Reichweite, AP, SD, Lethal, 3D-Modell. Trait-Wirkungen
+  aus `traits.md` sind noch NICHT umgesetzt.
+- **Roster:** die 5 aktuellen Klassen (Breacher/Deadeye/Handler/Heavy/
+  Reiver) gegen 4 Drohnen + 2 Spitter. Die 4 alten Story-Charaktere sind
+  raus. Die Klassen-Fähigkeiten sind aber noch die vier alten
+  (Slug Rush/Mend/Shock/Bulwark), provisorisch verteilt – M7 steht aus.
+- **Deckung:** die geometrische Erkennung (`cover_malus`, 0/20/40) ist
+  unverändert geblieben und wird über `cover_bonus_dice` in Bonuswürfel
+  übersetzt (flankiert +2, leichte Deckung +1, volle Deckung +0).
+  3-Strahlen-Sichtlinie mit Debug-Taste **L**, siehe `combat.md`.
+- **Nahkampf:** Charge-Bonus (+2, max. 2 Charges pro Aktivierung),
+  Zone of Control (`in_zoc`/`leaves_zoc`, Gegenangriff beim Verlassen),
+  Flanking-Bonus.
+- **Aktivierung:** alternierende Einzelaktivierungen, Commitment ab
+  erstem Aktionspunkt. Neu aus den Playtests: zweite Bewegung in einer
+  Aktivierung ist ein **Dash** (3 Felder), und dieselbe Aktionsart darf
+  nicht zweimal pro Aktivierung verwendet werden.
+- **Overwatch** unterbricht Bewegung – aktuell **ohne Malus**, weil die
+  Design-Frage offen ist (siehe unten). Das Sentry-Passiv des Deadeye
+  ist dadurch bis auf Weiteres wirkungslos.
+- **Karte & Kamera:** 18×18 Felder, freie Kamera mit WASD-Pan und
+  Q/E-Drehung, Anti-Aliasing, UI-Panels, Tracer-/Flinch-/Todes-
+  Animationen, Sieg/Niederlage mit Neustart (R).
+- **Assets:** Kenney-Platzhalter (Space Kit, Space Station, Blaster Kit,
+  Prototype) unter `game/assets/`.
+
+**Noch offen:** Guarded-Haltung (M5), Statuseffekte Pinned/Overheat/
+Shaken (M6), echte Klassen-Grundfähigkeiten (M7), Waffen-Traits.
+Der Stand pro Meilenstein steht in `prototype-plan.md`.
 
 ## Code-Konventionen
 

@@ -47,12 +47,29 @@
 
 ## Bekannte Diskrepanzen zwischen Docs und aktuellem Code
 
-Der lauffähige Godot-Prototyp implementiert noch das **alte
-Prozent-Trefferchancen-System** mit den 4 alten Story-Charakteren
-(Kane/Roan/Okafor/Reyes) statt der 5 aktuellen Klassen. Das ist der
-Gegenstand des nächsten Bauabschnitts, siehe `prototype-plan.md`. Bis
-dahin gilt: **die Dokumente hier sind die Zielvorgabe, der Code ist der
-Ausgangspunkt, nicht die Wahrheit über den aktuellen Design-Stand.**
+> Stand: 2026-08-31. Bei jeder Doku-Synchronisation mit prüfen.
+
+Der Würfelpool-Umbau ist **weitgehend erfolgt** – der Code ist beim
+Kampfsystem nicht mehr hinter den Docs zurück. Umgesetzt sind M1–M4
+(Würfelpool-Mathematik, Waffenprofile, Fernkampf mit Deckung, Nahkampf
+mit Charge/ZoC/Flanking) sowie das Roster der 5 aktuellen Klassen; das
+alte Prozentsystem und die 4 Story-Charaktere sind aus dem Spiel
+entfernt. Verbleibende Lücken zwischen Docs und Code:
+
+- **Guarded-Haltung (M5) fehlt.** Overwatch existiert, aber ohne die in
+  `dice-system.md` Abschnitt 8 beschriebene Haltungswahl.
+- **Statuseffekte Pinned/Overheat/Shaken (M6) fehlen** komplett.
+- **Klassen-Grundfähigkeiten (M7) sind provisorisch.** Die 5 Klassen
+  tragen noch die vier alten Fähigkeiten (Slug Rush/Mend/Shock/Bulwark),
+  thematisch verteilt; der Reiver hat gar keine. Die echten
+  Grundfähigkeiten aus `skills.md` stehen aus.
+- **Waffen-Traits fehlen.** Waffen haben Zahlenwerte
+  (Reichweite/AP/SD/Lethal), aber keine Trait-Wirkungen aus `traits.md`.
+
+Umgekehrt enthält der Code inzwischen Dinge, die in den Docs noch nicht
+beschrieben sind – aus den Playtest-Runden entstanden: eine Dash-Regel
+für die zweite Bewegung in einer Aktivierung und eine Sperre gegen
+dieselbe Aktion zweimal pro Aktivierung.
 
 ## Offene Design-Fragen, die noch eine Antwort brauchen
 

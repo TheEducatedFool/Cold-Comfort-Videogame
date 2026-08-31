@@ -301,6 +301,14 @@ func _build_floor() -> void:
 	for x in GRID_W:
 		for y in GRID_H:
 			var c := Vector2i(x, y)
+			# Boden IMMER platzieren, auch unter Hindernissen - deren Fußabdruck
+			# (v. a. bei den Kisten-Modellen, ~80% der Zellbreite) deckt die
+			# Zelle nicht randlos ab, sonst blitzt der schwarze Hintergrund
+			# durch die Lücke.
+			var floor_tile := MODEL_FLOOR.instantiate()
+			floor_tile.scale = Vector3(TILE * 0.98, 1.0, TILE * 0.98)
+			floor_tile.position = Vector3(x * TILE, 0.0, y * TILE)
+			add_child(floor_tile)
 			if OBSTACLES.has(c):
 				var h: float = OBSTACLES[c]
 				var inst: Node3D
@@ -340,11 +348,6 @@ func _build_floor() -> void:
 							inst.scale.y = h
 				inst.position = Vector3(x * TILE, 0.0, y * TILE)
 				add_child(inst)
-			else:
-				var tile := MODEL_FLOOR.instantiate()
-				tile.scale = Vector3(TILE * 0.98, 1.0, TILE * 0.98)
-				tile.position = Vector3(x * TILE, 0.0, y * TILE)
-				add_child(tile)
 
 	hover_marker = _make_quad(mat_hover, FLOOR_SURFACE_Y + 0.03)
 	hover_marker.visible = false
@@ -517,7 +520,7 @@ func _add_unit(p_name: String, p_faction: int, color: Color, stats: Dictionary, 
 ## ohne den ist Text über der 3D-Szene kaum lesbar (Kamils Meldung).
 func _panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.05, 0.08, 0.75)
+	style.bg_color = Color(0.04, 0.05, 0.08, 0.92)
 	style.set_content_margin_all(10)
 	style.set_corner_radius_all(6)
 	return style
@@ -877,6 +880,11 @@ func _handle_click(screen_pos: Vector2) -> void:
 
 ## Bewegt die ausgewählte Einheit zu Feld 'c' (Klick-Logik; auch vom
 ## automatisierten Testlauf genutzt). Rückgabe: ob bewegt wurde.
+## Bewegung ist ein "offener" Aktionspunkt: man darf in mehreren Klicks bis
+## zum vollen Budget weiterlaufen (6 Felder, bzw. 3 bei einer zweiten
+## Bewegung/Dash), ohne dass zwischendurch schon ein Aktionspunkt verbraucht
+## wird. Der Punkt gilt erst als aufgebraucht, wenn das Budget aufgebraucht
+## ist (hier) oder eine andere Aktion folgt (_finalize_pending_move()).
 func _try_move_selected(c: Vector2i) -> bool:
 	if selected == null or not _can_move(selected) or not highlight_nodes.has(c):
 		return false
@@ -885,22 +893,44 @@ func _try_move_selected(c: Vector2i) -> bool:
 		return false
 	if not _commit(selected):
 		return false
-	if selected.rush_move:
-		# Slug Rush: Bewegung ist Teil der Fähigkeit, Freischuss wird scharf.
-		selected.rush_move = false
-		selected.free_shot = true
-		ship_label.text = "Ship: \"Vorwärtssprint registriert. Ich empfehle allen anderen: aus dem Weg.\""
-	else:
-		selected.actions -= 1
+
+	if not selected.move_pending:
+		# Neue Bewegungsaktion (keine Fortsetzung einer laufenden) - Budget
+		# und Dash-/Slug-Rush-Status jetzt festlegen.
+		selected.move_budget_left = selected.effective_move_range()
+		selected.moves_used += 1
+		selected.move_is_free = selected.rush_move
+		if selected.rush_move:
+			selected.rush_move = false
+			selected.free_shot = true
+			ship_label.text = "Ship: \"Vorwärtssprint registriert. Ich empfehle allen anderen: aus dem Weg.\""
+		selected.move_pending = true
+
 	if selected.bulwark:
 		selected.set_bulwark(false)  # Bewegung beendet Bulwark Stance
 	_clear_highlights()
 	hover_marker.visible = false
 	_track_charge(selected, path[0], path[path.size() - 1])
-	selected.moves_used += 1
+	selected.move_budget_left -= path.size() - 1
 	_walk_with_reactions(selected, path)
+	if selected.move_budget_left <= 0:
+		_finalize_pending_move(selected)
 	_update_labels()
 	return true
+
+
+## Schließt eine offene Bewegungsaktion ab: verbraucht jetzt (nicht schon
+## beim ersten Klick) den Aktionspunkt - außer die Bewegung war durch Slug
+## Rush bereits bezahlt (move_is_free). Wird aufgerufen, wenn das
+## Bewegungsbudget aufgebraucht ist ODER die Einheit etwas anderes tut.
+func _finalize_pending_move(u: Unit) -> void:
+	if not u.move_pending:
+		return
+	u.move_pending = false
+	u.move_budget_left = 0
+	if not u.move_is_free:
+		u.actions -= 1
+	u.move_is_free = false
 
 
 ## Klick auf einen Gegner: statt automatisch zu feuern, ein Menü mit den
@@ -1025,6 +1055,7 @@ func _do_overwatch() -> void:
 		return
 	if not _commit(selected):
 		return
+	_finalize_pending_move(selected)  # eine andere Aktion schließt eine offene Bewegung ab
 	selected.actions = 0
 	selected.rush_move = false
 	pending_ability = ""
@@ -1051,6 +1082,7 @@ func _use_ability_slot(slot: int) -> void:
 				return
 			if not _commit(selected):
 				return
+			_finalize_pending_move(selected)
 			selected.actions -= 1
 			selected.rush_move = true
 			selected.cooldowns["slug_rush"] = ABILITIES["slug_rush"]["cooldown"]
@@ -1060,6 +1092,7 @@ func _use_ability_slot(slot: int) -> void:
 				return
 			if not _commit(selected):
 				return
+			_finalize_pending_move(selected)
 			selected.actions -= 1
 			selected.set_bulwark(true)
 			ship_label.text = "Ship: \"Bulwark-Haltung aktiv. Offiziell Teil der Architektur.\""
@@ -1082,6 +1115,7 @@ func _use_ability_slot(slot: int) -> void:
 func _cast_shock(caster: Unit, target: Unit) -> void:
 	if not _commit(caster):
 		return
+	_finalize_pending_move(caster)
 	caster.actions -= 1
 	caster.cooldowns["shock"] = ABILITIES["shock"]["cooldown"]
 	info_label.text = INFO_DEFAULT
@@ -1115,6 +1149,7 @@ func _resolve_pending_ability(target: Unit) -> void:
 			pending_ability = ""
 			return
 		pending_ability = ""
+		_finalize_pending_move(caster)
 		caster.actions -= 1
 		caster.cooldowns["mend"] = ABILITIES["mend"]["cooldown"]
 		info_label.text = INFO_DEFAULT
@@ -1287,7 +1322,8 @@ func _refresh_highlights() -> void:
 		return
 	if not _can_move(selected) or selected.is_moving:
 		return
-	var reach := grid.reachable(selected.cell, selected.effective_move_range(), _occupied_cells(selected))
+	var budget := selected.move_budget_left if selected.move_pending else selected.effective_move_range()
+	var reach := grid.reachable(selected.cell, budget, _occupied_cells(selected))
 	for c in reach:
 		if c == selected.cell:
 			continue
@@ -1524,6 +1560,7 @@ func _show_hit_popup(target: Unit, res: Dictionary) -> void:
 
 ## 'use_melee': Schießen (false) oder Nahkampf (true) - siehe _roll_attack.
 func _player_attack(attacker: Unit, target: Unit, use_melee: bool) -> void:
+	_finalize_pending_move(attacker)  # eine andere Aktion schließt eine offene Bewegung ab
 	# Charge (dice-system.md Abschnitt 3): der ausgelöste Nahkampfangriff
 	# direkt nach dem aktiven Reinbewegen in eine gegnerische ZoC kostet
 	# KEINEN zusätzlichen Aktionspunkt - _roll_attack verbraucht
@@ -1607,6 +1644,9 @@ func _commit(u: Unit) -> bool:
 	u.charge_ready = false
 	u.moves_used = 0
 	u.used_action_types.clear()
+	u.move_pending = false
+	u.move_budget_left = 0
+	u.move_is_free = false
 	if u.overwatch:
 		u.set_overwatch(false)  # Eine neue Aktivierung ersetzt alten Overwatch
 	_update_labels()
@@ -1643,6 +1683,7 @@ func _finish_player_activation() -> void:
 	var u := active_unit
 	active_unit = null
 	if u != null and is_instance_valid(u):
+		_finalize_pending_move(u)  # Aktivierung endet -> offene Bewegung abschließen
 		u.rush_move = false
 		u.free_shot = false
 		u.actions = 0
@@ -1791,6 +1832,18 @@ func _start_new_round() -> void:
 		p.tick_cooldowns()
 		p.rush_move = false
 		p.free_shot = false
+		# Bugfix: diese Felder wurden bisher erst bei _commit() zurückgesetzt,
+		# also erst beim ERSTEN Aktionsklick der neuen Aktivierung - die
+		# Bewegungsvorschau (_refresh_highlights) direkt nach dem Auswählen
+		# sah davor noch den alten Stand (z. B. faelschlich nur Dash-
+		# Reichweite statt der vollen 6 Felder).
+		p.moves_used = 0
+		p.used_action_types.clear()
+		p.charges_used = 0
+		p.charge_ready = false
+		p.move_pending = false
+		p.move_budget_left = 0
+		p.move_is_free = false
 	_build_enemy_queue()
 	player_turn = true
 	end_turn_button.disabled = false

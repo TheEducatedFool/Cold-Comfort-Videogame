@@ -1,15 +1,40 @@
 # COLD COMFORT – Meilensteinplan: Würfelpool-Prototyp
 
 > Konkretisiert `roadmap.md` Phase 2 (Design ✅ abgeschlossen) und den
-> Anfang von Phase 3 für die anstehenden Claude-Code-Sessions. Ziel:
-> den lauffähigen Prototyp (aktuell noch Prozent-Trefferchance, 4 alte
-> Charaktere) Schritt für Schritt auf das in `dice-system.md`/`traits.md`
-> beschriebene Würfelpool-System und die 5 aktuellen Klassen
-> (`classes.md`/`skills.md`) umstellen – ohne dass das Spiel zwischen
-> den Meilensteinen längere Zeit unspielbar/ungetestet ist.
+> Anfang von Phase 3. Ziel: den Prototyp Schritt für Schritt auf das in
+> `dice-system.md`/`traits.md` beschriebene Würfelpool-System und die
+> 5 aktuellen Klassen (`classes.md`/`skills.md`) umstellen – ohne dass
+> das Spiel zwischen den Meilensteinen längere Zeit unspielbar bleibt.
+> Der Umbau ist zum großen Teil erfolgt, siehe Statustabelle unten.
 >
 > Fertige Prompts zum Kopieren für jeden Meilenstein: `code-session-prompts.md`.
 > Technischer Rahmen (Codebase-Konventionen, Debugging): `tech-reference.md`.
+
+## Stand am 2026-08-31
+
+| | Meilenstein | Status |
+|---|---|---|
+| M0 | Baseline sichern & Docs einspielen | ✅ fertig (Git-Repo, Commit `b0a94e0`) |
+| M1 | Würfelpool-Kernmathematik | ✅ fertig (`5ce709c`) |
+| M2 | Einheiten- & Waffenprofil-Umbau | ✅ fertig (`91d1743`) |
+| M3 | Fernkampf-Auflösung & Deckung | ✅ fertig (`91d1743`) |
+| M4 | Nahkampf: Charge, ZoC, Flanking | ✅ fertig (`1ddcbd5`) |
+| M5 | Guarded-Haltung & Overwatch | ⬜ offen |
+| M6 | Statuseffekte Pinned/Overheat/Shaken | ⬜ offen |
+| M7 | 5 Klassen mit Grundfähigkeit | 🔸 halb: Roster umgestellt, Fähigkeiten noch die alten |
+| M8 | Regression, Balancing, Playtest | 🔸 läuft parallel: drei Playtest-Runden erfolgt |
+
+**Nächster sinnvoller Schritt:** M7 zu Ende bringen (echte
+Grundfähigkeiten aus `skills.md` statt der vier alten Fähigkeiten), oder
+vorher die offene Overwatch-Frage klären und M5 nachziehen.
+
+**Weiterhin ungeklärt und blockierend für M5:** der Overwatch-Malus
+(siehe Arbeitsprinzip 3 unten). Im Code steht dazu ein
+`# TODO Design-Entscheidung` in `main.gd` bei `_overwatch_shot`; bis zur
+Klärung feuert Overwatch ohne Malus, wodurch das Sentry-Passiv des
+Deadeye wirkungslos bleibt.
+
+---
 
 ## Arbeitsprinzipien für alle Meilensteine
 
@@ -37,7 +62,7 @@
 
 ---
 
-## M0 – Baseline sichern & Docs einspielen
+## ✅ M0 – Baseline sichern & Docs einspielen
 
 **Zweck:** Sauberer, überprüfbarer Ausgangspunkt, bevor Kampfmathe
 angefasst wird.
@@ -56,7 +81,7 @@ gesichert.
 
 ---
 
-## M1 – Würfelpool-Kernmathematik (reine Logik, ohne UI)
+## ✅ M1 – Würfelpool-Kernmathematik (reine Logik, ohne UI)
 
 **Zweck:** Die eigentliche Würfelmechanik als testbare, von der
 Darstellung getrennte Funktionsbibliothek bauen – Grundlage für alles
@@ -86,7 +111,7 @@ Spiel angebunden.
 
 ---
 
-## M2 – Einheiten- & Waffenprofil-Umbau
+## ✅ M2 – Einheiten- & Waffenprofil-Umbau
 
 **Zweck:** `unit.gd` und die Waffen-Resource auf die neuen Datenfelder
 umstellen.
@@ -116,7 +141,7 @@ im Editor/Debugger inspizieren; alte `aim`/`falloff`-Felder sind aus
 
 ---
 
-## M3 – Fernkampf-Auflösung & Deckung anbinden
+## ✅ M3 – Fernkampf-Auflösung & Deckung anbinden
 
 **Zweck:** Den ersten tatsächlich spielbaren Schuss mit dem neuen System.
 
@@ -142,7 +167,7 @@ Würfelpool-System, inklusive Deckung, sichtbar im Log/UI, Fuzz-Test grün.
 
 ---
 
-## M4 – Nahkampf: Charge, Zone of Control, Flanking
+## ✅ M4 – Nahkampf: Charge, Zone of Control, Flanking
 
 **Zweck:** Nahkampf auf denselben Basis-Pool umstellen und die neuen
 räumlichen Mechaniken einbauen.
@@ -165,7 +190,7 @@ Gegenangriff im Spiel funktioniert, mit Tests abgesichert.
 
 ---
 
-## M5 – Guarded/Engaged-Haltung & Overwatch-Integration
+## ⬜ M5 – Guarded/Engaged-Haltung & Overwatch-Integration
 
 **Zweck:** Die Aktivierungs-Haltungswahl einbauen.
 
@@ -184,7 +209,7 @@ Handeln, Overwatch und Guarded wählen, alle drei sichtbar im UI.
 
 ---
 
-## M6 – Statuseffekte: Pinned, Overheat, Shaken
+## ⬜ M6 – Statuseffekte: Pinned, Overheat, Shaken
 
 **Zweck:** Die Debuff-Mechaniken einbauen, die mehrere Klassen-Skills
 voraussetzen.
@@ -203,7 +228,7 @@ im Spiel auslösen kann, sichtbar als Status-Icon o. Ä.
 
 ---
 
-## M7 – 5 Klassen mit Grundfähigkeit
+## 🔸 M7 – 5 Klassen mit Grundfähigkeit
 
 **Zweck:** Das alte 4-Charaktere-Roster final durch die 5 aktuellen
 Klassen ersetzen, jede mit ihrer Grundfähigkeit aus `skills.md` (noch
@@ -219,7 +244,7 @@ gegen die Swarm-Gegner spielbar ist, inkl. je einer Grundfähigkeit.
 
 ---
 
-## M8 – Regression, Balancing-Pass, Playtest
+## 🔸 M8 – Regression, Balancing-Pass, Playtest
 
 **Zweck:** Absichern und erste Zahlen anhand von echtem Spielgefühl
 justieren.
@@ -240,17 +265,16 @@ grundsätzlich zufrieden – danach geht es weiter mit `roadmap.md` Phase 3
 ## Übersicht
 
 ```
-M0  Baseline sichern & Docs einspielen
-M1  Würfelpool-Kernmathematik (reine Logik)
-M2  Einheiten- & Waffenprofil-Umbau
-M3  Fernkampf-Auflösung & Deckung anbinden      ← erster spielbarer Meilenstein
-M4  Nahkampf: Charge, Zone of Control, Flanking
-M5  Guarded/Engaged-Haltung & Overwatch
-M6  Statuseffekte: Pinned, Overheat, Shaken
-M7  5 Klassen mit Grundfähigkeit
-M8  Regression, Balancing-Pass, Playtest
+✅ M0  Baseline sichern & Docs einspielen
+✅ M1  Würfelpool-Kernmathematik (reine Logik)
+✅ M2  Einheiten- & Waffenprofil-Umbau
+✅ M3  Fernkampf-Auflösung & Deckung anbinden
+✅ M4  Nahkampf: Charge, Zone of Control, Flanking
+⬜ M5  Guarded/Engaged-Haltung & Overwatch      ← blockiert durch offene Malus-Frage
+⬜ M6  Statuseffekte: Pinned, Overheat, Shaken
+🔸 M7  5 Klassen mit Grundfähigkeit             ← Roster fertig, Fähigkeiten offen
+🔸 M8  Regression, Balancing-Pass, Playtest     ← läuft parallel mit
 ```
 
-M0–M3 sind ein realistischer Umfang für den morgigen Sessionstart.
-M4–M8 folgen in weiteren Sessions, jeweils mit eigenem Prompt in
-`code-session-prompts.md`.
+M0–M4 sind erledigt. M5–M8 folgen in weiteren Sessions, jeweils mit
+eigenem Prompt in `code-session-prompts.md`.

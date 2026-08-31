@@ -80,6 +80,15 @@ const DASH_RANGE := 3            # zweite Bewegung in einer Aktivierung = Dash
 var moves_used: int = 0          # 0 = naechste Bewegung volle move_range, sonst Dash
 var used_action_types: Array[String] = []  # z.B. "ranged_attack"/"melee_attack"
 
+# --- Bewegung als "offener" Aktionspunkt (Kamils Klarstellung 2026-09-01):
+# man darf bis zum vollen Budget (6 bzw. 3 bei Dash) in mehreren Klicks
+# weiterlaufen, ohne dass zwischendurch schon ein Aktionspunkt verbraucht
+# wird - der Punkt gilt erst als aufgebraucht, wenn das Budget aufgebraucht
+# ist ODER eine andere Aktion folgt (main.gd._finalize_pending_move()).
+var move_pending: bool = false
+var move_budget_left: int = 0
+var move_is_free: bool = false   # true = durch Slug Rush bezahlt, kostet keinen Punkt
+
 var hp_label: Label3D
 var shield_bubble: MeshInstance3D
 

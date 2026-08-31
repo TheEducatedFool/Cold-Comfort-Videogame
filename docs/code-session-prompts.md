@@ -4,6 +4,12 @@
 > Projektordner). Jeder Prompt ist als eigenständige erste Nachricht
 > einer neuen Session gedacht – Claude Code startet ohne Erinnerung an
 > frühere Sessions. Reihenfolge folgt `prototype-plan.md`.
+>
+> **Stand 2026-08-31: Prompt 0 und Prompt 1 sind abgearbeitet** (M0–M4
+> sind fertig, CLAUDE.md existiert). Sie stehen nur noch als Referenz
+> hier – nicht erneut kopieren, ihre Lagebeschreibung ist veraltet.
+> Aktuell dran: die Prompts für M5–M7, siehe Statustabelle in
+> `prototype-plan.md`.
 
 ---
 

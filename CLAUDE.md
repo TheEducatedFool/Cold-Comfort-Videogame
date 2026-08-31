@@ -14,8 +14,9 @@ als fertig gemeldet wird, auf Deutsch kommunizieren.
     (ersetzt das frühere `handover.md`).
   - `docs/gdd.md` – Game Design Document im Überblick.
   - `docs/dice-system.md` – das aktuelle Würfelpool-Kampfsystem (d10,
-    Halo-Flashpoint-/Kill-Team-inspiriert) – fertig entschieden, aber
-    **noch nicht implementiert** (siehe `docs/prototype-plan.md`).
+    Halo-Flashpoint-/Kill-Team-inspiriert) – **im Kern implementiert**
+    (M1–M4). Noch offen: Guarded-Haltung (M5) und die Statuseffekte
+    Pinned/Overheat/Shaken (M6), siehe `docs/prototype-plan.md`.
   - `docs/traits.md` – Waffenprofil (Reichweite/AP/SD/Lethal), Traits,
     Statuseffekte.
   - `docs/classes.md`, `docs/skills.md` – die 5 aktuellen Klassen und
@@ -41,13 +42,16 @@ als fertig gemeldet wird, auf Deutsch kommunizieren.
   - `scripts/unit.gd` – Einheit.
   - `scripts/grid.gd` – Raster/BFS.
   - `scripts/combat.gd` – Kampfmathe, pure statics (testbar, ohne
-    Godot-Node-Abhängigkeiten). **Implementiert aktuell noch das alte
-    Prozent-Trefferchancen-System** – wird gerade auf das Würfelpool-
-    System aus `docs/dice-system.md` umgebaut, siehe
-    `docs/prototype-plan.md` für den Stand.
-  - `tests/` – `test_combat.gd`, `test_damage.gd`, `test_los3.gd`
-    (gezielte Tests) und `test_fuzz.gd` (Zufalls-Spieltest, spielt eine
-    ganze Partie durch, deckt Laufzeitfehler auf).
+    Godot-Node-Abhängigkeiten). Enthält das **Würfelpool-System**
+    (`roll_pool`, `net_successes`, `resolve_net_damage`), die
+    Deckungs-Geometrie (`cover_malus` → `cover_bonus_dice`) und die
+    Zone of Control (`in_zoc`, `leaves_zoc`). Das alte
+    Prozent-Trefferchancen-System ist vollständig entfernt.
+  - `scripts/weapon.gd`, `scripts/weapons.gd` – Waffen-Resource
+    (Reichweite/AP/SD/Lethal/Modell) und der Startwaffen-Katalog.
+  - `tests/` – `test_dice_pool.gd`, `test_combat.gd`, `test_damage.gd`,
+    `test_los3.gd` (gezielte Tests) und `test_fuzz.gd` (Zufalls-Spieltest,
+    spielt eine ganze Partie durch, deckt Laufzeitfehler auf).
   - Godot 4.7.2 (Windows, Standard, nicht .NET) liegt unter
     `Godot_v4.7.2-stable/` im Projekt-Root.
 
