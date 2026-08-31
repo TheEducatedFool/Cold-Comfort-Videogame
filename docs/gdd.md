@@ -129,6 +129,15 @@ XCOM-Struktur („erst mein ganzes Team, dann deins").
 - **Missionskarten:** Story-Missionen handgebaut, Nebenmissionen
   prozedural generiert.
 
+**Noch offen (aus Kamils Playtest des Würfelpool-Prototyps, 2026-08-31):**
+Ist eine Seite mit allen ihren Aktivierungen durch, bevor die andere
+fertig ist, kann sie für den Rest der Runde gar nichts mehr tun, während
+die Gegenseite ungestört weiterzieht. Vermutlich braucht es abgeschwächte
+„Countermeasure"-Aktivierungen für die durchaktivierte Seite (z. B. nur 1
+statt 2 Aktionspunkte) – bewusst zurückgestellt für eine eigene Design-/
+Balancing-Session, nicht im Prototyp-Umbau (`prototype-plan.md`)
+mitgelöst.
+
 ### Klassen & Fähigkeiten
 
 5 feste Klassen (Breacher, Deadeye, Handler, Heavy, Reiver), volle
